@@ -1480,6 +1480,9 @@ export type CodexManagedAccount = {
   id: string
   email: string
   managedHomePath: string
+  managedHomeRuntime?: 'host' | 'wsl'
+  wslDistro?: string | null
+  wslLinuxHomePath?: string | null
   providerAccountId?: string | null
   workspaceLabel?: string | null
   workspaceAccountId?: string | null
@@ -1491,6 +1494,8 @@ export type CodexManagedAccount = {
 export type CodexManagedAccountSummary = {
   id: string
   email: string
+  managedHomeRuntime?: 'host' | 'wsl'
+  wslDistro?: string | null
   providerAccountId?: string | null
   workspaceLabel?: string | null
   workspaceAccountId?: string | null
@@ -1508,6 +1513,9 @@ export type ClaudeManagedAccount = {
   id: string
   email: string
   managedAuthPath: string
+  managedAuthRuntime?: 'host' | 'wsl'
+  wslDistro?: string | null
+  wslLinuxAuthPath?: string | null
   authMethod: 'subscription-oauth' | 'unknown'
   organizationUuid?: string | null
   organizationName?: string | null
@@ -1519,6 +1527,8 @@ export type ClaudeManagedAccount = {
 export type ClaudeManagedAccountSummary = {
   id: string
   email: string
+  managedAuthRuntime?: 'host' | 'wsl'
+  wslDistro?: string | null
   authMethod: 'subscription-oauth' | 'unknown'
   organizationUuid?: string | null
   organizationName?: string | null
@@ -1711,6 +1721,20 @@ export type GlobalSettings = {
    *  user's preferred shell. Defaults to 'powershell.exe' which is the
    *  modern choice for an IDE context. Only consulted on Windows. */
   terminalWindowsShell: string
+  /** Why: when WSL is the Windows default shell, users with multiple distros
+   *  need Orca to launch terminals and scan agents in the same chosen distro
+   *  instead of whatever WSL currently marks as its global default. */
+  terminalWindowsWslDistro?: string | null
+  /** Why: account/auth location is independent from the user's preferred
+   *  terminal shell. A user may default new terminals to WSL while still
+   *  inspecting or adding Windows-scoped provider accounts. */
+  localAccountRuntime: 'host' | 'wsl'
+  localAccountWslDistro?: string | null
+  /** Why: installed-agent detection is also a local environment choice. Keep
+   *  it independent so users can inspect Windows and WSL PATH state without
+   *  changing the default terminal shell. */
+  localAgentRuntime?: 'host' | 'wsl'
+  localAgentWslDistro?: string | null
   /** Why: "PowerShell" is the product-facing shell family. Auto resolves to
    *  PowerShell 7+ when present and falls back to inbox Windows PowerShell. */
   terminalWindowsPowerShellImplementation: 'auto' | 'powershell.exe' | 'pwsh.exe'

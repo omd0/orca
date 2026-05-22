@@ -82,6 +82,8 @@ describe('AgentsPane', () => {
   it('renders the keep-awake toggle from settings', () => {
     const markup = renderPane(getDefaultSettings('/tmp'))
 
+    expect(markup).toContain('Agent location')
+    expect(markup).toContain('Show installed agents from Windows')
     expect(markup).toContain('Keep computer awake while agents are working')
     expect(markup).toContain(
       'Keeps this computer and display awake while agents are working. Orca also asks this device to stay awake when the lid is closed, subject to its power policy.'
@@ -148,5 +150,10 @@ describe('AgentsPane', () => {
     expect(matchesSettingsSearch('hooks', AGENTS_PANE_SEARCH_ENTRIES)).toBe(true)
     expect(matchesSettingsSearch('waiting', AGENTS_PANE_SEARCH_ENTRIES)).toBe(true)
     expect(matchesSettingsSearch('codex', AGENTS_PANE_SEARCH_ENTRIES)).toBe(true)
+  })
+
+  it('includes agent location search metadata', () => {
+    expect(matchesSettingsSearch('wsl', AGENTS_PANE_SEARCH_ENTRIES)).toBe(true)
+    expect(matchesSettingsSearch('windows', AGENTS_PANE_SEARCH_ENTRIES)).toBe(true)
   })
 })

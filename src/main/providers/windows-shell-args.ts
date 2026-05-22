@@ -94,7 +94,7 @@ export function resolveWindowsShellLaunchArgs(
     const driveMatch = cwd.replace(/\\/g, '/').match(/^([A-Za-z]):\/?(.*)$/)
     const linuxCwd = driveMatch ? toLinuxPath(cwd) : '/mnt/c'
     return {
-      shellArgs: buildWslShellArgs(linuxCwd),
+      shellArgs: buildWslShellArgs(linuxCwd, wslContext?.distro),
       effectiveCwd: defaultCwd,
       validationCwd: cwd
     }

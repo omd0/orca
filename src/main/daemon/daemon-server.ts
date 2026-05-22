@@ -220,6 +220,7 @@ export class DaemonServer {
           envToDelete: p.envToDelete,
           command: p.command,
           shellOverride: p.shellOverride,
+          terminalWindowsWslDistro: p.terminalWindowsWslDistro,
           terminalWindowsPowerShellImplementation: p.terminalWindowsPowerShellImplementation,
           shellReadySupported: p.shellReadySupported,
           streamClient: {

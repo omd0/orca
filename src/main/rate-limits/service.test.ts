@@ -230,6 +230,44 @@ describe('RateLimitService', () => {
     expect(state.opencodeGo?.session?.usedPercent).toBe(40)
   })
 
+  it('passes the selected WSL Codex home into active account rate-limit fetches', async () => {
+    const service = new RateLimitService()
+    const wslCodexHome =
+      '\\\\wsl.localhost\\Ubuntu\\home\\jin\\.local\\share\\orca\\codex-accounts\\a\\home'
+    service.setCodexHomePathResolver(() => wslCodexHome)
+
+    vi.mocked(fetchClaudeRateLimits).mockResolvedValueOnce(okProvider('claude', 10, Date.now()))
+    vi.mocked(fetchCodexRateLimits).mockResolvedValueOnce(okProvider('codex', 20, Date.now()))
+
+    await service.refresh()
+
+    expect(fetchCodexRateLimits).toHaveBeenCalledWith({ codexHomePath: wslCodexHome })
+  })
+
+  it('passes WSL Codex managed homes into inactive account rate-limit fetches', async () => {
+    const service = new RateLimitService()
+    const wslCodexHome =
+      '\\\\wsl.localhost\\Ubuntu\\home\\jin\\.local\\share\\orca\\codex-accounts\\a\\home'
+    service.setInactiveCodexAccountsResolver(() => [
+      { id: 'account-1', managedHomePath: wslCodexHome }
+    ])
+    vi.mocked(fetchCodexRateLimits).mockResolvedValueOnce(okProvider('codex', 33, Date.now()))
+
+    await service.fetchInactiveCodexAccountsOnOpen()
+
+    expect(fetchCodexRateLimits).toHaveBeenCalledWith({ codexHomePath: wslCodexHome })
+    expect(service.getState().inactiveCodexAccounts).toEqual([
+      {
+        accountId: 'account-1',
+        claude: expect.objectContaining({
+          session: expect.objectContaining({ usedPercent: 33 })
+        }),
+        updatedAt: expect.any(Number),
+        isFetching: false
+      }
+    ])
+  })
+
   it('preserves Gemini buckets through getState after fetch', async () => {
     const service = new RateLimitService()
 

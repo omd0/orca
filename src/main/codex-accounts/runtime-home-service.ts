@@ -24,6 +24,7 @@ import {
 } from '../codex/codex-home-paths'
 import { syncSystemCodexSessionsIntoManagedHome } from '../codex/codex-session-bridge'
 import { syncSystemConfigIntoManagedCodexHome } from '../codex/codex-config-mirror'
+import { parseWslUncPath } from '../../shared/wsl-paths'
 
 type CodexAuthIdentity = {
   email: string | null
@@ -77,10 +78,27 @@ export class CodexRuntimeHomeService {
 
   private initializeLastSyncedState(): void {
     const settings = this.store.getSettings()
-    this.lastSyncedAccountId = settings.activeCodexManagedAccountId
+    const activeAccount = this.getActiveAccount(
+      settings.codexManagedAccounts,
+      settings.activeCodexManagedAccountId
+    )
+    // Why: WSL-managed homes are never materialized into host ~/.codex.
+    // Treating one as "last synced" makes cold start look like a host-account
+    // transition and can restore/delete host auth that Orca never touched.
+    this.lastSyncedAccountId = this.getWslManagedHomePath(activeAccount)
+      ? null
+      : settings.activeCodexManagedAccountId
   }
 
   prepareForCodexLaunch(): string {
+    const activeAccount = this.getActiveAccount(
+      this.store.getSettings().codexManagedAccounts,
+      this.store.getSettings().activeCodexManagedAccountId
+    )
+    const wslHome = this.getWslManagedHomePath(activeAccount)
+    if (wslHome) {
+      return wslHome
+    }
     this.syncForCurrentSelection()
     syncSystemCodexResourcesIntoManagedHome()
     syncSystemConfigIntoManagedCodexHome()
@@ -89,6 +107,14 @@ export class CodexRuntimeHomeService {
   }
 
   prepareForRateLimitFetch(): string {
+    const activeAccount = this.getActiveAccount(
+      this.store.getSettings().codexManagedAccounts,
+      this.store.getSettings().activeCodexManagedAccountId
+    )
+    const wslHome = this.getWslManagedHomePath(activeAccount)
+    if (wslHome) {
+      return wslHome
+    }
     this.syncForCurrentSelection()
     syncSystemCodexResourcesIntoManagedHome()
     syncSystemConfigIntoManagedCodexHome()
@@ -109,6 +135,23 @@ export class CodexRuntimeHomeService {
       settings.codexManagedAccounts,
       this.lastSyncedAccountId
     )
+    if (this.getWslManagedHomePath(activeAccount)) {
+      const previousWasHostManaged = previousAccount && !this.getWslManagedHomePath(previousAccount)
+      const outgoingReadBackResult = previousWasHostManaged
+        ? this.readBackRefreshedTokensForAccount(previousAccount, {
+            updateLastWrittenAuthJson: false
+          })
+        : 'unchanged'
+      if (previousWasHostManaged) {
+        this.restoreSystemDefaultSnapshot({
+          detectExternalLogin: outgoingReadBackResult !== 'rejected'
+        })
+      }
+      this.lastSyncedAccountId = null
+      this.lastWrittenAuthJson = null
+      this.skipNextReadBackForAccountId = null
+      return
+    }
     let outgoingReadBackResult: CodexReadBackResult = 'unchanged'
     if (previousAccount && previousAccount.id !== activeAccount?.id) {
       outgoingReadBackResult = this.readBackRefreshedTokensForAccount(previousAccount, {
@@ -275,6 +318,16 @@ export class CodexRuntimeHomeService {
       return null
     }
     return accounts.find((account) => account.id === activeAccountId) ?? null
+  }
+
+  private getWslManagedHomePath(account: CodexManagedAccount | null): string | null {
+    if (!account) {
+      return null
+    }
+    if (account.managedHomeRuntime === 'wsl' && parseWslUncPath(account.managedHomePath)) {
+      return account.managedHomePath
+    }
+    return parseWslUncPath(account.managedHomePath) ? account.managedHomePath : null
   }
 
   private findManagedAccountForRuntimeAuth(runtimeAuthContents: string): CodexReadBackMatch {

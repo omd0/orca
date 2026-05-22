@@ -1,3 +1,6 @@
+/* eslint-disable max-lines -- Why: AgentsPane keeps the detected-agent list,
+   default-agent picker, command override rows, and exported hook setting in one
+   place because those pieces share the same detected/default-agent state. */
 import { useMemo, useState } from 'react'
 import { Check, ChevronDown, ExternalLink, RefreshCw, Terminal } from 'lucide-react'
 import type { GlobalSettings, TuiAgent } from '../../../../shared/types'
@@ -7,6 +10,7 @@ import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { cn } from '@/lib/utils'
 import { AgentAwakeSetting } from './AgentAwakeSetting'
+import { AgentLocationSetting } from './AgentLocationSetting'
 import { AGENT_STATUS_HOOKS_DESCRIPTION, AGENT_STATUS_HOOKS_TITLE } from './agent-status-hooks-copy'
 import { SettingsBadge, SettingsSubsectionHeader, SettingsSwitchRow } from './SettingsFormControls'
 
@@ -14,7 +18,10 @@ export { AGENTS_PANE_SEARCH_ENTRIES } from './agents-search'
 
 type AgentsPaneProps = {
   settings: GlobalSettings
-  updateSettings: (updates: Partial<GlobalSettings>) => void
+  updateSettings: (updates: Partial<GlobalSettings>) => void | Promise<void>
+  wslAvailable?: boolean
+  wslDistros?: string[]
+  wslCapabilitiesLoading?: boolean
 }
 
 type AgentRowProps = {
@@ -234,7 +241,13 @@ function DefaultAgentPill({ active, onClick, children }: DefaultAgentPillProps):
   )
 }
 
-export function AgentsPane({ settings, updateSettings }: AgentsPaneProps): React.JSX.Element {
+export function AgentsPane({
+  settings,
+  updateSettings,
+  wslAvailable = false,
+  wslDistros = [],
+  wslCapabilitiesLoading = false
+}: AgentsPaneProps): React.JSX.Element {
   const { detectedIds: detectedList, isRefreshing, refresh } = useDetectedAgents()
   // Why: refresh re-spawns the user's login shell to re-capture PATH
   // (preflight:refreshAgents on the main side). This handles the
@@ -264,7 +277,11 @@ export function AgentsPane({ settings, updateSettings }: AgentsPaneProps): React
     updateSettings({ agentCmdOverrides: next })
   }
 
-  const detectedAgents = AGENT_CATALOG.filter((a) => detectedIds === null || detectedIds.has(a.id))
+  // Why: null means detection is in flight, not "all agents are installed".
+  // Showing the full catalog here makes the default-agent picker flash invalid
+  // options while switching between Windows and WSL detection contexts.
+  const detectedAgents =
+    detectedIds === null ? [] : AGENT_CATALOG.filter((agent) => detectedIds.has(agent.id))
   const undetectedAgents = AGENT_CATALOG.filter(
     (a) => detectedIds !== null && !detectedIds.has(a.id)
   )
@@ -278,6 +295,15 @@ export function AgentsPane({ settings, updateSettings }: AgentsPaneProps): React
 
   return (
     <div className="space-y-8">
+      <AgentLocationSetting
+        settings={settings}
+        updateSettings={updateSettings}
+        refresh={refresh}
+        wslAvailable={wslAvailable}
+        wslDistros={wslDistros}
+        wslCapabilitiesLoading={wslCapabilitiesLoading}
+      />
+
       <section className="space-y-4">
         <SettingsSubsectionHeader
           title="Default Agent"

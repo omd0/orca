@@ -1,7 +1,7 @@
 /* eslint-disable max-lines -- Why: Claude managed accounts need one audited owner
 for login, credential capture, Keychain storage, selection, and rate-limit refresh. */
 import { randomUUID } from 'node:crypto'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, resolve, sep } from 'node:path'
@@ -30,6 +30,9 @@ import {
   writeManagedClaudeKeychainCredentials
 } from './keychain'
 import { beginClaudeAuthSwitch, endClaudeAuthSwitch } from './live-pty-gate'
+import { parseWslUncPath } from '../../shared/wsl-paths'
+import { toWindowsWslPath } from '../wsl'
+import { buildEncodedWslBashCommand } from '../wsl-bash-command'
 
 const LOGIN_TIMEOUT_MS = 180_000
 const STATUS_TIMEOUT_MS = 20_000
@@ -52,6 +55,22 @@ type ManagedClaudeAuthSnapshot = {
   oauthAccountJson: string | null
 }
 
+export type ClaudeAccountAddTarget = {
+  runtime?: 'host' | 'wsl'
+  wslDistro?: string | null
+}
+
+type ManagedClaudeAuthLocation = {
+  managedAuthPath: string
+  managedAuthRuntime: 'host' | 'wsl'
+  wslDistro: string | null
+  wslLinuxAuthPath: string | null
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`
+}
+
 export class ClaudeAccountService {
   private mutationQueue: Promise<unknown> = Promise.resolve()
 
@@ -66,8 +85,8 @@ export class ClaudeAccountService {
     return this.getSnapshot()
   }
 
-  async addAccount(): Promise<ClaudeRateLimitAccountsState> {
-    return this.serializeMutation(() => this.doAddAccount())
+  async addAccount(target?: ClaudeAccountAddTarget): Promise<ClaudeRateLimitAccountsState> {
+    return this.serializeMutation(() => this.doAddAccount(target))
   }
 
   async reauthenticateAccount(accountId: string): Promise<ClaudeRateLimitAccountsState> {
@@ -88,13 +107,16 @@ export class ClaudeAccountService {
     return next
   }
 
-  private async doAddAccount(): Promise<ClaudeRateLimitAccountsState> {
+  private async doAddAccount(
+    target?: ClaudeAccountAddTarget
+  ): Promise<ClaudeRateLimitAccountsState> {
     const accountId = randomUUID()
-    const managedAuthPath = this.createManagedAuthDir(accountId)
+    const managedAuth = this.createManagedAuthDir(accountId, target)
+    const { managedAuthPath } = managedAuth
     const previousSettings = this.store.getSettings()
 
     try {
-      const captured = await this.runClaudeLoginAndCapture()
+      const captured = await this.runClaudeLoginAndCapture(managedAuth)
       if (!captured.identity.email) {
         throw new Error('Claude login completed, but Orca could not resolve the account email.')
       }
@@ -105,6 +127,9 @@ export class ClaudeAccountService {
         id: accountId,
         email: captured.identity.email,
         managedAuthPath,
+        managedAuthRuntime: managedAuth.managedAuthRuntime,
+        wslDistro: managedAuth.wslDistro,
+        wslLinuxAuthPath: managedAuth.wslLinuxAuthPath,
         authMethod: 'subscription-oauth',
         organizationUuid: captured.identity.organizationUuid,
         organizationName: captured.identity.organizationName,
@@ -135,7 +160,12 @@ export class ClaudeAccountService {
     const managedAuthPath = this.assertManagedAuthPath(account.managedAuthPath, accountId)
     const previousSettings = this.store.getSettings()
     const previousManagedAuth = await this.readManagedAuthSnapshot(accountId, managedAuthPath)
-    const captured = await this.runClaudeLoginAndCapture()
+    const captured = await this.runClaudeLoginAndCapture({
+      managedAuthPath,
+      managedAuthRuntime: account.managedAuthRuntime ?? 'host',
+      wslDistro: account.wslDistro ?? null,
+      wslLinuxAuthPath: account.wslLinuxAuthPath ?? null
+    })
     if (!captured.identity.email) {
       throw new Error('Claude login completed, but Orca could not resolve the account email.')
     }
@@ -266,6 +296,8 @@ export class ClaudeAccountService {
     return {
       id: account.id,
       email: account.email,
+      managedAuthRuntime: account.managedAuthRuntime ?? 'host',
+      wslDistro: account.wslDistro ?? null,
       authMethod: account.authMethod ?? 'unknown',
       organizationUuid: account.organizationUuid ?? null,
       organizationName: account.organizationName ?? null,
@@ -314,27 +346,38 @@ export class ClaudeAccountService {
     }
   }
 
-  private async runClaudeLoginAndCapture(): Promise<CapturedClaudeAuth> {
-    const tempConfigDir = mkdtempSync(join(tmpdir(), 'orca-claude-login-'))
+  private async runClaudeLoginAndCapture(
+    location: ManagedClaudeAuthLocation = {
+      managedAuthPath: '',
+      managedAuthRuntime: 'host',
+      wslDistro: null,
+      wslLinuxAuthPath: null
+    }
+  ): Promise<CapturedClaudeAuth> {
+    const tempConfig = this.createTemporaryClaudeConfigDir(location)
     const previousLegacyKeychain = await readActiveClaudeKeychainCredentials()
     let captured: CapturedClaudeAuth | null = null
     let captureError: unknown = null
     let cleanupError: unknown = null
     try {
-      await this.runClaudeCommand(['auth', 'login', '--claudeai'], tempConfigDir, LOGIN_TIMEOUT_MS)
+      await this.runClaudeCommand(['auth', 'login', '--claudeai'], tempConfig, LOGIN_TIMEOUT_MS)
       const status = await this.runClaudeCommand(
         ['auth', 'status', '--json'],
-        tempConfigDir,
+        tempConfig,
         STATUS_TIMEOUT_MS,
         { allowFailure: true }
       )
-      captured = await this.captureAuthFromConfigDir(tempConfigDir, status, previousLegacyKeychain)
+      captured = await this.captureAuthFromConfigDir(
+        tempConfig.windowsPath,
+        status,
+        previousLegacyKeychain
+      )
     } catch (error) {
       captureError = error
     } finally {
       if (process.platform === 'darwin') {
         try {
-          await deleteActiveClaudeKeychainCredentialsStrict(tempConfigDir)
+          await deleteActiveClaudeKeychainCredentialsStrict(tempConfig.windowsPath)
         } catch (error) {
           console.warn('[claude-accounts] Failed to clean temporary Claude Keychain item:', error)
         }
@@ -350,7 +393,7 @@ export class ClaudeAccountService {
           cleanupError = error
         }
       }
-      rmSync(tempConfigDir, { recursive: true, force: true })
+      this.removeTemporaryClaudeConfigDir(tempConfig)
     }
     if (captureError) {
       throw captureError
@@ -359,6 +402,72 @@ export class ClaudeAccountService {
       throw cleanupError
     }
     return captured!
+  }
+
+  private createTemporaryClaudeConfigDir(location: ManagedClaudeAuthLocation): {
+    windowsPath: string
+    linuxPath: string | null
+    wslDistro: string | null
+  } {
+    if (location.managedAuthRuntime !== 'wsl') {
+      return {
+        windowsPath: mkdtempSync(join(tmpdir(), 'orca-claude-login-')),
+        linuxPath: null,
+        wslDistro: null
+      }
+    }
+    if (!location.wslDistro) {
+      throw new Error('Could not resolve the active WSL distribution for Claude login.')
+    }
+    const linuxPath = execFileSync(
+      'wsl.exe',
+      [
+        '-d',
+        location.wslDistro,
+        '--',
+        'bash',
+        '-lc',
+        'mktemp -d "${TMPDIR:-/tmp}/orca-claude-login.XXXXXX"'
+      ],
+      { encoding: 'utf-8', timeout: 5000 }
+    )
+      .replaceAll(String.fromCharCode(0), '')
+      .trim()
+    if (!linuxPath.startsWith('/')) {
+      throw new Error('Could not create a temporary WSL Claude login directory.')
+    }
+    return {
+      windowsPath: toWindowsWslPath(linuxPath, location.wslDistro),
+      linuxPath,
+      wslDistro: location.wslDistro
+    }
+  }
+
+  private removeTemporaryClaudeConfigDir(tempConfig: {
+    windowsPath: string
+    linuxPath: string | null
+    wslDistro: string | null
+  }): void {
+    if (tempConfig.linuxPath && tempConfig.wslDistro) {
+      try {
+        execFileSync(
+          'wsl.exe',
+          [
+            '-d',
+            tempConfig.wslDistro,
+            '--',
+            'bash',
+            '-lc',
+            `rm -rf -- ${shellQuote(tempConfig.linuxPath)}`
+          ],
+          { encoding: 'utf-8', timeout: 5000 }
+        )
+      } catch {
+        // Best-effort cleanup.
+      }
+      return
+    }
+    rmSync(tempConfig.windowsPath, { recursive: true, force: true })
   }
 
   private async captureAuthFromConfigDir(
@@ -520,11 +629,72 @@ export class ClaudeAccountService {
     }
   }
 
-  private createManagedAuthDir(accountId: string): string {
+  private createManagedAuthDir(
+    accountId: string,
+    target?: ClaudeAccountAddTarget
+  ): ManagedClaudeAuthLocation {
+    const wslAuth = this.tryCreateWslManagedAuthDir(accountId, target)
+    if (wslAuth) {
+      return wslAuth
+    }
+
     const managedAuthPath = join(this.getManagedAccountsRoot(), accountId, 'auth')
     mkdirSync(managedAuthPath, { recursive: true })
     writeFileSync(join(managedAuthPath, '.orca-managed-claude-auth'), `${accountId}\n`, 'utf-8')
-    return this.assertManagedAuthPath(managedAuthPath, accountId)
+    return {
+      managedAuthPath: this.assertManagedAuthPath(managedAuthPath, accountId),
+      managedAuthRuntime: 'host',
+      wslDistro: null,
+      wslLinuxAuthPath: null
+    }
+  }
+
+  private tryCreateWslManagedAuthDir(
+    accountId: string,
+    target?: ClaudeAccountAddTarget
+  ): ManagedClaudeAuthLocation | null {
+    if (process.platform !== 'win32' || target?.runtime !== 'wsl') {
+      return null
+    }
+
+    const distroArgs = target.wslDistro?.trim() ? ['-d', target.wslDistro.trim()] : []
+    const infoOutput = execFileSync(
+      'wsl.exe',
+      [...distroArgs, '--', 'bash', '-lc', 'printf "%s\\n%s\\n" "$WSL_DISTRO_NAME" "$HOME"'],
+      { encoding: 'utf-8', timeout: 5000 }
+    )
+    const [rawDistro, rawHome] = infoOutput
+      .replaceAll(String.fromCharCode(0), '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+    const distro = target.wslDistro?.trim() || rawDistro
+    const home = rawHome
+    if (!distro || !home?.startsWith('/')) {
+      throw new Error('Could not resolve the active WSL home directory for Claude login.')
+    }
+
+    const wslLinuxAuthPath = `${home.replace(/\/$/, '')}/.local/share/orca/claude-accounts/${accountId}/auth`
+    const markerPath = `${wslLinuxAuthPath}/.orca-managed-claude-auth`
+    execFileSync(
+      'wsl.exe',
+      [
+        '-d',
+        distro,
+        '--',
+        'bash',
+        '-lc',
+        `mkdir -p ${shellQuote(wslLinuxAuthPath)} && printf '%s\\n' ${shellQuote(accountId)} > ${shellQuote(markerPath)}`
+      ],
+      { encoding: 'utf-8', timeout: 5000 }
+    )
+
+    const managedAuthPath = toWindowsWslPath(wslLinuxAuthPath, distro)
+    return {
+      managedAuthPath: this.assertManagedAuthPath(managedAuthPath, accountId),
+      managedAuthRuntime: 'wsl',
+      wslDistro: distro,
+      wslLinuxAuthPath
+    }
   }
 
   private getManagedAccountsRoot(): string {
@@ -534,6 +704,60 @@ export class ClaudeAccountService {
   }
 
   private assertManagedAuthPath(candidatePath: string, expectedAccountId?: string): string {
+    const wslInfo = parseWslUncPath(candidatePath)
+    if (wslInfo) {
+      if (
+        !wslInfo.linuxPath.includes('/.local/share/orca/claude-accounts/') ||
+        !wslInfo.linuxPath.endsWith('/auth')
+      ) {
+        throw new Error('Managed WSL Claude auth storage is outside Orca account storage.')
+      }
+      if (process.platform === 'win32') {
+        try {
+          const canonicalLinuxPath = execFileSync(
+            'wsl.exe',
+            [
+              '-d',
+              wslInfo.distro,
+              '--',
+              'bash',
+              '-lc',
+              buildEncodedWslBashCommand(
+                [
+                  'set -euo pipefail',
+                  `candidate=${shellQuote(wslInfo.linuxPath)}`,
+                  'managed_root="${HOME%/}/.local/share/orca/claude-accounts"',
+                  'candidate_real=$(readlink -f -- "$candidate")',
+                  'managed_root_real=$(readlink -f -- "$managed_root")',
+                  'test -f "$candidate_real/.orca-managed-claude-auth"',
+                  expectedAccountId
+                    ? `test "$(cat "$candidate_real/.orca-managed-claude-auth")" = ${shellQuote(expectedAccountId)}`
+                    : 'test -n "$(cat "$candidate_real/.orca-managed-claude-auth")"',
+                  'case "$candidate_real" in "$managed_root_real"/*/auth) printf "%s\\n" "$candidate_real" ;; *) exit 35 ;; esac'
+                ].join('\n')
+              )
+            ],
+            { encoding: 'utf-8', timeout: 5000 }
+          ).trim()
+          if (!canonicalLinuxPath) {
+            throw new Error('Managed Claude auth directory does not exist on disk.')
+          }
+          return toWindowsWslPath(canonicalLinuxPath, wslInfo.distro)
+        } catch (error) {
+          throw new Error('Managed WSL Claude auth storage is outside Orca account storage.', {
+            cause: error
+          })
+        }
+      }
+      if (
+        !existsSync(candidatePath) ||
+        !existsSync(join(candidatePath, '.orca-managed-claude-auth'))
+      ) {
+        throw new Error('Managed Claude auth storage is not owned by Orca.')
+      }
+      return candidatePath
+    }
+
     this.getManagedAccountsRoot()
     const accountId = expectedAccountId ?? this.readManagedAuthAccountIdFromPath(candidatePath)
     if (!accountId || (expectedAccountId && accountId !== expectedAccountId)) {
@@ -567,19 +791,39 @@ export class ClaudeAccountService {
 
   private runClaudeCommand(
     args: string[],
-    configDir: string,
+    configDir: { windowsPath: string; linuxPath: string | null; wslDistro: string | null },
     timeoutMs: number,
     options?: { allowFailure?: boolean }
   ): Promise<string> {
     return new Promise((resolvePromise, rejectPromise) => {
-      const claudeCommand = resolveClaudeCommand()
-      const child = spawn(claudeCommand, args, {
+      const spawnConfig =
+        configDir.linuxPath && configDir.wslDistro
+          ? {
+              command: 'wsl.exe',
+              args: [
+                '-d',
+                configDir.wslDistro,
+                '--',
+                'bash',
+                '-lc',
+                `export CLAUDE_CONFIG_DIR=${shellQuote(configDir.linuxPath)}; exec claude ${args.map(shellQuote).join(' ')}`
+              ],
+              env: process.env,
+              shell: false
+            }
+          : {
+              command: resolveClaudeCommand(),
+              args,
+              env: {
+                ...process.env,
+                CLAUDE_CONFIG_DIR: configDir.windowsPath
+              },
+              shell: process.platform === 'win32'
+            }
+      const child = spawn(spawnConfig.command, spawnConfig.args, {
         stdio: ['ignore', 'pipe', 'pipe'],
-        shell: process.platform === 'win32',
-        env: {
-          ...process.env,
-          CLAUDE_CONFIG_DIR: configDir
-        }
+        shell: spawnConfig.shell,
+        env: spawnConfig.env
       })
 
       let settled = false

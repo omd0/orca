@@ -438,7 +438,7 @@ function createWebPreloadApi(): Partial<PreloadApi> {
     },
     pty: createPtyApi(),
     ssh: createSshApi(),
-    wsl: { isAvailable: () => Promise.resolve(false) },
+    wsl: { isAvailable: () => Promise.resolve(false), listDistros: () => Promise.resolve([]) },
     pwsh: { isAvailable: () => Promise.resolve(false) },
     agentStatus: {
       onSet: () => noopUnsubscribe,

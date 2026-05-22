@@ -58,6 +58,15 @@ function getCodexAccountLabel(
   return state.accounts.find((account) => account.id === accountId)?.email ?? 'Codex account'
 }
 
+function getCodexAccountRuntimeLabel(
+  account: CodexRateLimitAccountsState['accounts'][number]
+): string {
+  if (account.managedHomeRuntime === 'wsl') {
+    return account.wslDistro ? `WSL ${account.wslDistro}` : 'WSL'
+  }
+  return 'Windows'
+}
+
 function CodexRestartStatusPrompt(): React.JSX.Element | null {
   const tabsByWorktree = useAppStore((s) => s.tabsByWorktree)
   const ptyIdsByTabId = useAppStore((s) => s.ptyIdsByTabId)
@@ -183,8 +192,10 @@ function ClaudeSwitcherMenu({
   const activeAccountLabel =
     accounts.activeAccountId === null
       ? 'System default'
-      : (accounts.accounts.find((account) => account.id === accounts.activeAccountId)?.email ??
-        'Managed')
+      : (() => {
+          const account = accounts.accounts.find((entry) => entry.id === accounts.activeAccountId)
+          return account?.email ?? 'Managed'
+        })()
   const availableSwitchTargets = [
     ...(accounts.activeAccountId === null
       ? []
@@ -555,8 +566,15 @@ function CodexSwitcherMenu({
   const activeAccountLabel =
     accounts.activeAccountId === null
       ? 'System default'
-      : (accounts.accounts.find((account) => account.id === accounts.activeAccountId)?.email ??
-        'Managed')
+      : (() => {
+          const account = accounts.accounts.find((entry) => entry.id === accounts.activeAccountId)
+          if (!account) {
+            return 'Managed'
+          }
+          return account.workspaceLabel
+            ? `${account.email} (${account.workspaceLabel}) · ${getCodexAccountRuntimeLabel(account)}`
+            : `${account.email} · ${getCodexAccountRuntimeLabel(account)}`
+        })()
   const availableSwitchTargets = [
     ...(accounts.activeAccountId === null
       ? []
@@ -566,8 +584,8 @@ function CodexSwitcherMenu({
       .map((account) => ({
         id: account.id,
         label: account.workspaceLabel
-          ? `${account.email} (${account.workspaceLabel})`
-          : account.email
+          ? `${account.email} (${account.workspaceLabel}) · ${getCodexAccountRuntimeLabel(account)}`
+          : `${account.email} · ${getCodexAccountRuntimeLabel(account)}`
       }))
   ]
 

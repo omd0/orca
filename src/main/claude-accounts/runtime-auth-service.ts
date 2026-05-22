@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- Why: Claude account switching has one safety
 boundary: runtime auth materialization. Keeping file, Keychain, snapshot, and
 env-patch semantics together prevents PTY launch and quota fetch paths drifting. */
+import { execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
@@ -13,6 +14,9 @@ import {
   resolveOwnedClaudeManagedAuthPath,
   writeClaudeManagedAuthFile
 } from './managed-auth-path'
+import { parseWslUncPath } from '../../shared/wsl-paths'
+import { toWindowsWslPath } from '../wsl'
+import { buildEncodedWslBashCommand } from '../wsl-bash-command'
 import { hasLiveClaudePtys } from './live-pty-gate'
 import { ClaudeRuntimePathResolver } from './runtime-paths'
 import {
@@ -27,6 +31,9 @@ import {
 
 export type ClaudeRuntimeAuthPreparation = {
   configDir: string
+  runtime?: 'host' | 'wsl'
+  wslDistro?: string | null
+  wslLinuxConfigDir?: string | null
   envPatch: ClaudeEnvPatch
   stripAuthEnv: boolean
   provenance: string
@@ -63,6 +70,10 @@ type ClaudeKeychainSnapshotValue =
 type ClaudeRefreshTokenComparison = 'same' | 'different' | 'missing'
 
 const RUNTIME_OAUTH_ACCOUNT_PARSE_ERROR = Symbol('runtime-oauth-account-parse-error')
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`
+}
 
 export class ClaudeRuntimeAuthService {
   private readonly pathResolver = new ClaudeRuntimePathResolver()
@@ -175,6 +186,29 @@ export class ClaudeRuntimeAuthService {
           : this.restoreSystemDefaultSnapshot(this.lastWrittenCredentialsJson, undefined))
         this.lastSyncedAccountId = null
       }
+      return
+    }
+
+    if (activeAccount.managedAuthRuntime === 'wsl') {
+      if (!this.getOwnedManagedAuthPath(activeAccount)) {
+        console.warn(
+          '[claude-runtime-auth] Active WSL managed account is not owned by Orca, restoring system default'
+        )
+        this.store.updateSettings({ activeClaudeManagedAccountId: null })
+        this.lastSyncedAccountId = null
+        return
+      }
+      // Why: WSL managed Claude accounts are already isolated by their Linux
+      // CLAUDE_CONFIG_DIR. Materializing them into Windows ~/.claude would mix
+      // two runtime auth stores and break the Terminal-default runtime contract.
+      if (this.lastSyncedAccountId !== activeAccount.id && previousAccount) {
+        await this.restoreSystemDefaultSnapshot(
+          previousManagedCredentialsJson,
+          previousManagedOauthAccount
+        )
+      }
+      this.lastSyncedAccountId = activeAccount.id
+      this.clearLastWrittenRuntimeState()
       return
     }
 
@@ -450,11 +484,35 @@ export class ClaudeRuntimeAuthService {
     const settings = this.store.getSettings()
     const paths = this.pathResolver.getRuntimePaths()
     const activeAccountId = settings.activeClaudeManagedAccountId
+    const activeAccount = this.getActiveAccount(settings.claudeManagedAccounts, activeAccountId)
+    const shouldUseWslAccount =
+      process.platform === 'win32' && settings.terminalWindowsShell === 'wsl.exe'
+    if (
+      shouldUseWslAccount &&
+      activeAccount?.managedAuthRuntime === 'wsl' &&
+      activeAccount.wslLinuxAuthPath
+    ) {
+      return {
+        configDir: activeAccount.managedAuthPath,
+        runtime: 'wsl',
+        wslDistro: activeAccount.wslDistro ?? null,
+        wslLinuxConfigDir: activeAccount.wslLinuxAuthPath,
+        envPatch: { CLAUDE_CONFIG_DIR: activeAccount.wslLinuxAuthPath },
+        stripAuthEnv: true,
+        provenance: `managed:${activeAccount.id}:wsl:${activeAccount.wslDistro ?? ''}`
+      }
+    }
     return {
       configDir: paths.configDir,
+      runtime: 'host',
+      wslDistro: null,
+      wslLinuxConfigDir: null,
       envPatch: paths.envPatch,
-      stripAuthEnv: Boolean(activeAccountId),
-      provenance: activeAccountId ? `managed:${activeAccountId}` : 'system'
+      stripAuthEnv: Boolean(activeAccountId && activeAccount?.managedAuthRuntime !== 'wsl'),
+      provenance:
+        activeAccountId && activeAccount?.managedAuthRuntime !== 'wsl'
+          ? `managed:${activeAccountId}`
+          : 'system'
     }
   }
 
@@ -773,6 +831,46 @@ export class ClaudeRuntimeAuthService {
   }
 
   private getOwnedManagedAuthPath(account: ClaudeManagedAccount): string | null {
+    const wslInfo = parseWslUncPath(account.managedAuthPath)
+    if (wslInfo) {
+      if (
+        !wslInfo.linuxPath.includes('/.local/share/orca/claude-accounts/') ||
+        !wslInfo.linuxPath.endsWith('/auth')
+      ) {
+        return null
+      }
+      if (process.platform === 'win32') {
+        try {
+          const canonicalLinuxPath = execFileSync(
+            'wsl.exe',
+            [
+              '-d',
+              wslInfo.distro,
+              '--',
+              'bash',
+              '-lc',
+              buildEncodedWslBashCommand(
+                [
+                  'set -euo pipefail',
+                  `candidate=${shellQuote(wslInfo.linuxPath)}`,
+                  'managed_root="${HOME%/}/.local/share/orca/claude-accounts"',
+                  'candidate_real=$(readlink -f -- "$candidate")',
+                  'managed_root_real=$(readlink -f -- "$managed_root")',
+                  'test -f "$candidate_real/.orca-managed-claude-auth"',
+                  `test "$(cat "$candidate_real/.orca-managed-claude-auth")" = ${shellQuote(account.id)}`,
+                  'case "$candidate_real" in "$managed_root_real"/*/auth) printf "%s\\n" "$candidate_real" ;; *) exit 35 ;; esac'
+                ].join('\n')
+              )
+            ],
+            { encoding: 'utf-8', timeout: 5000 }
+          ).trim()
+          return canonicalLinuxPath ? toWindowsWslPath(canonicalLinuxPath, wslInfo.distro) : null
+        } catch {
+          return null
+        }
+      }
+      return existsSync(account.managedAuthPath) ? account.managedAuthPath : null
+    }
     return resolveOwnedClaudeManagedAuthPath(account.id, account.managedAuthPath, {
       adoptLegacyMarker: true
     })

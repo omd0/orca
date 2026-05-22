@@ -1,9 +1,11 @@
 import { ipcMain } from 'electron'
-import type { CodexAccountService } from '../codex-accounts/service'
+import type { CodexAccountAddTarget, CodexAccountService } from '../codex-accounts/service'
 
 export function registerCodexAccountHandlers(codexAccounts: CodexAccountService): void {
   ipcMain.handle('codexAccounts:list', () => codexAccounts.listAccounts())
-  ipcMain.handle('codexAccounts:add', () => codexAccounts.addAccount())
+  ipcMain.handle('codexAccounts:add', (_event, args?: CodexAccountAddTarget) =>
+    codexAccounts.addAccount(args)
+  )
   ipcMain.handle('codexAccounts:reauthenticate', (_event, args: { accountId: string }) =>
     codexAccounts.reauthenticateAccount(args.accountId)
   )

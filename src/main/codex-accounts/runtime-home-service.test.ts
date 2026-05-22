@@ -74,6 +74,8 @@ function createSettings(overrides: Partial<GlobalSettings> = {}): GlobalSettings
     terminalAllowOsc52Clipboard: false,
     setupScriptLaunchMode: 'split-vertical',
     terminalScrollbackBytes: 10_000_000,
+    localAccountRuntime: 'host',
+    localAccountWslDistro: null,
     openLinksInApp: false,
     rightSidebarOpenByDefault: true,
     sourceControlViewMode: 'list',
@@ -668,6 +670,40 @@ describe('CodexRuntimeHomeService', () => {
       join(getRuntimeCodexHomePath(), 'skills'),
       join(systemCodexHome, 'skills')
     )
+  })
+
+  it('does not touch host auth on startup when the active account is WSL-backed', async () => {
+    const runtimeAuthPath = join(testState.fakeHomeDir, '.codex', 'auth.json')
+    writeFileSync(runtimeAuthPath, '{"account":"host-system"}\n', 'utf-8')
+    const wslManagedHomePath =
+      '\\\\wsl.localhost\\Ubuntu\\home\\alice\\.local\\share\\orca\\codex-accounts\\account-1\\home'
+    const settings = createSettings({
+      codexManagedAccounts: [
+        {
+          id: 'account-1',
+          email: 'user@example.com',
+          managedHomePath: wslManagedHomePath,
+          managedHomeRuntime: 'wsl',
+          wslDistro: 'Ubuntu',
+          wslLinuxHomePath: '/home/alice/.local/share/orca/codex-accounts/account-1/home',
+          providerAccountId: null,
+          workspaceLabel: null,
+          workspaceAccountId: null,
+          createdAt: 1,
+          updatedAt: 1,
+          lastAuthenticatedAt: 1
+        }
+      ],
+      activeCodexManagedAccountId: 'account-1'
+    })
+    const store = createStore(settings)
+
+    const { CodexRuntimeHomeService } = await import('./runtime-home-service')
+    const service = new CodexRuntimeHomeService(store as never)
+
+    expect(readFileSync(runtimeAuthPath, 'utf-8')).toBe('{"account":"host-system"}\n')
+    expect(service.prepareForCodexLaunch()).toBe(wslManagedHomePath)
+    expect(service.prepareForRateLimitFetch()).toBe(wslManagedHomePath)
   })
 
   it('does not overwrite auth.json when no managed account was ever active', async () => {
