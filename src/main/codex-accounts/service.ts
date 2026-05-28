@@ -160,7 +160,7 @@ export class CodexAccountService {
       // Why: the new account becomes active, so the previous active account is
       // now inactive and its last-known usage should be cached for the switcher.
       const outgoingAccountId = getSelectedCodexAccountIdForTarget(settings, targetSelection)
-      await this.rateLimits.refreshForCodexAccountChange(outgoingAccountId)
+      await this.rateLimits.refreshForCodexAccountChange(outgoingAccountId, targetSelection)
       return this.getSnapshot()
     } catch (error) {
       this.safeRemoveManagedHome(managedHomePath)
@@ -204,7 +204,10 @@ export class CodexAccountService {
     // Why: re-auth can change which actual Codex identity the managed home
     // points at. Force a fresh read immediately so the status bar cannot keep
     // showing the previous account's quota under the updated label.
-    await this.rateLimits.refreshForCodexAccountChange()
+    await this.rateLimits.refreshForCodexAccountChange(
+      undefined,
+      getCodexSelectionTargetForAccount(account)
+    )
     return this.getSnapshot()
   }
 
@@ -231,9 +234,11 @@ export class CodexAccountService {
     // so purge its cached usage to avoid stale entries.
     this.rateLimits.evictInactiveCodexCache(accountId)
     await this.rateLimits.refreshForCodexAccountChange(
-      settings.activeCodexManagedAccountId === accountId
-        ? settings.activeCodexManagedAccountId
-        : undefined
+      getSelectedCodexAccountIdForTarget(settings, getCodexSelectionTargetForAccount(account)) ===
+        accountId
+        ? accountId
+        : undefined,
+      getCodexSelectionTargetForAccount(account)
     )
     return this.getSnapshot()
   }
@@ -271,7 +276,7 @@ export class CodexAccountService {
     this.safeSyncCanonicalConfigToManagedHomes()
     this.runtimeHome.syncForCurrentSelection()
 
-    await this.rateLimits.refreshForCodexAccountChange(outgoingAccountId)
+    await this.rateLimits.refreshForCodexAccountChange(outgoingAccountId, effectiveTarget)
     return this.getSnapshot()
   }
 

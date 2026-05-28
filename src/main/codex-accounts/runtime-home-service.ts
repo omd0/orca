@@ -12,7 +12,7 @@ import {
   rmSync,
   statSync
 } from 'node:fs'
-import { dirname, extname, join, parse, relative } from 'node:path'
+import { dirname, extname, join, parse, relative, win32 as pathWin32 } from 'node:path'
 import { app } from 'electron'
 import type { CodexManagedAccount } from '../../shared/types'
 import type { Store } from '../persistence'
@@ -30,6 +30,7 @@ import {
   normalizeCodexRuntimeSelection,
   type CodexAccountSelectionTarget
 } from './runtime-selection'
+import { getDefaultWslDistro, getWslHome } from '../wsl'
 
 type CodexAuthIdentity = {
   email: string | null
@@ -102,7 +103,7 @@ export class CodexRuntimeHomeService {
         settings.codexManagedAccounts,
         getSelectedCodexAccountIdForTarget(settings, target)
       )
-      return this.getWslManagedHomePath(activeAccount)
+      return this.getWslManagedHomePath(activeAccount) ?? this.getWslSystemCodexHomePath(target)
     }
     this.syncForCurrentSelection()
     syncSystemCodexResourcesIntoManagedHome()
@@ -111,7 +112,27 @@ export class CodexRuntimeHomeService {
     return this.getRuntimeHomePath()
   }
 
-  prepareForRateLimitFetch(): string {
+  private getWslSystemCodexHomePath(target: CodexAccountSelectionTarget): string | null {
+    if (process.platform !== 'win32') {
+      return null
+    }
+    const distro = target.wslDistro?.trim() || getDefaultWslDistro()
+    if (!distro) {
+      return null
+    }
+    const home = getWslHome(distro)
+    return home ? pathWin32.join(home, '.codex') : null
+  }
+
+  prepareForRateLimitFetch(target?: CodexAccountSelectionTarget): string | null {
+    if (target?.runtime === 'wsl') {
+      const settings = this.store.getSettings()
+      const activeAccount = this.getActiveAccount(
+        settings.codexManagedAccounts,
+        getSelectedCodexAccountIdForTarget(settings, target)
+      )
+      return this.getWslManagedHomePath(activeAccount) ?? this.getWslSystemCodexHomePath(target)
+    }
     this.syncForCurrentSelection()
     syncSystemCodexResourcesIntoManagedHome()
     syncSystemConfigIntoManagedCodexHome()

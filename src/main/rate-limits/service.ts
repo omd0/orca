@@ -13,11 +13,18 @@ import { fetchCodexRateLimits } from './codex-fetcher'
 import type { ClaudeRuntimeAuthPreparation } from '../claude-accounts/runtime-auth-service'
 import { fetchGeminiRateLimits } from './gemini-usage-fetcher'
 import { fetchOpenCodeGoRateLimits } from './opencode-go-usage-fetcher'
+import {
+  normalizeCodexAccountSelectionTarget,
+  type CodexAccountSelectionTarget,
+  type NormalizedCodexAccountSelectionTarget
+} from '../codex-accounts/runtime-selection'
 
 export type InactiveCodexAccountInfo = {
   id: string
   managedHomePath: string
 }
+
+type CodexHomePathResolver = (target?: CodexAccountSelectionTarget) => string | null
 
 // Why: Claude's subscription usage endpoint has a tight request budget. Quota
 // state is informational, so prefer keeping a recent snapshot over polling it
@@ -57,7 +64,11 @@ export class RateLimitService {
   private claudeFetchGeneration = 0
   private opencodeFetchGeneration = 0
   private lastOpencodeConfigHash = ''
-  private codexHomePathResolver: (() => string | null) | null = null
+  private codexHomePathResolver: CodexHomePathResolver | null = null
+  private codexFetchTarget: NormalizedCodexAccountSelectionTarget = {
+    runtime: 'host',
+    wslDistro: null
+  }
   private claudeAuthPreparationResolver: (() => Promise<ClaudeRuntimeAuthPreparation>) | null = null
   private settingsResolver:
     | (() => {
@@ -86,7 +97,7 @@ export class RateLimitService {
     }
   }
 
-  setCodexHomePathResolver(resolver: () => string | null): void {
+  setCodexHomePathResolver(resolver: CodexHomePathResolver): void {
     this.codexHomePathResolver = resolver
   }
 
@@ -172,10 +183,19 @@ export class RateLimitService {
     return this.getState()
   }
 
-  async refreshForCodexAccountChange(outgoingAccountId?: string | null): Promise<RateLimitState> {
-    if (outgoingAccountId && this.state.codex?.session) {
+  async refreshForCodexAccountChange(
+    outgoingAccountId?: string | null,
+    target?: CodexAccountSelectionTarget
+  ): Promise<RateLimitState> {
+    const nextTarget = normalizeCodexAccountSelectionTarget(target)
+    if (
+      outgoingAccountId &&
+      this.state.codex?.session &&
+      this.isSameCodexTarget(this.codexFetchTarget, nextTarget)
+    ) {
       this.inactiveCodexCache.set(outgoingAccountId, this.state.codex)
     }
+    this.codexFetchTarget = nextTarget
     this.codexFetchGeneration += 1
     this.lastInactiveCodexFetchAt = 0
     // Why: switching the selected Codex account must immediately clear the old
@@ -271,6 +291,9 @@ export class RateLimitService {
 
   async fetchInactiveCodexAccountsOnOpen(): Promise<void> {
     if (Date.now() - this.lastInactiveCodexFetchAt < INACTIVE_FETCH_DEBOUNCE_MS) {
+      return
+    }
+    if (this.inactiveCodexFetching.size > 0) {
       return
     }
     const accounts = this.inactiveCodexAccountsResolver?.() ?? []
@@ -532,6 +555,27 @@ export class RateLimitService {
     }
   }
 
+  private isSameCodexTarget(
+    left: NormalizedCodexAccountSelectionTarget,
+    right: NormalizedCodexAccountSelectionTarget
+  ): boolean {
+    return left.runtime === right.runtime && left.wslDistro === right.wslDistro
+  }
+
+  private getCodexProvenance(
+    target: NormalizedCodexAccountSelectionTarget,
+    codexHomePath: string | null
+  ): string {
+    const targetKey = target.runtime === 'wsl' ? `wsl:${target.wslDistro ?? '__default__'}` : 'host'
+    return codexHomePath ? `${targetKey}:managed:${codexHomePath}` : `${targetKey}:system`
+  }
+
+  private shouldAllowCodexPtyFallback(): boolean {
+    // Why: quota UI refreshes run in the background. On Windows, hidden PTY
+    // fallback can crash inside ConPTY, so prefer RPC-only degradation there.
+    return process.platform !== 'win32'
+  }
+
   private withFetchingStatus(
     current: ProviderRateLimits | null,
     provider: 'claude' | 'codex' | 'gemini' | 'opencode-go'
@@ -553,8 +597,9 @@ export class RateLimitService {
     const claudeAuthPreparation = await this.claudeAuthPreparationResolver?.()
     const claudeProvenance = claudeAuthPreparation?.provenance ?? 'system'
     const claudeGeneration = this.claudeFetchGeneration
-    const codexHomePath = this.codexHomePathResolver?.() ?? null
-    const codexProvenance = codexHomePath ? `managed:${codexHomePath}` : 'system'
+    const codexTarget = this.codexFetchTarget
+    const codexHomePath = this.codexHomePathResolver?.(codexTarget) ?? null
+    const codexProvenance = this.getCodexProvenance(codexTarget, codexHomePath)
     const codexGeneration = this.codexFetchGeneration
     const previousState = this.state
     const settings = this.settingsResolver?.()
@@ -587,7 +632,10 @@ export class RateLimitService {
 
     const [claudeResult, codexResult, geminiResult, opencodeGoResult] = await Promise.allSettled([
       fetchClaudeRateLimits({ authPreparation: claudeAuthPreparation }),
-      fetchCodexRateLimits({ codexHomePath }),
+      fetchCodexRateLimits({
+        codexHomePath,
+        allowPtyFallback: this.shouldAllowCodexPtyFallback()
+      }),
       fetchGeminiRateLimits(geminiCliOAuthEnabled),
       fetchOpenCodeGoRateLimits(cookie, workspaceIdOverride || undefined)
     ])
@@ -647,10 +695,10 @@ export class RateLimitService {
             status: 'error'
           } satisfies ProviderRateLimits)
 
-    const latestCodexHomePath = this.codexHomePathResolver?.() ?? null
+    const latestCodexHomePath = this.codexHomePathResolver?.(codexTarget) ?? null
     const latestClaudeAuthPreparation = await this.claudeAuthPreparationResolver?.()
     const latestClaudeProvenance = latestClaudeAuthPreparation?.provenance ?? 'system'
-    const latestCodexProvenance = latestCodexHomePath ? `managed:${latestCodexHomePath}` : 'system'
+    const latestCodexProvenance = this.getCodexProvenance(codexTarget, latestCodexHomePath)
     const shouldApplyCodex =
       codexGeneration === this.codexFetchGeneration && codexProvenance === latestCodexProvenance
     const shouldApplyClaude =
@@ -681,8 +729,9 @@ export class RateLimitService {
   }
 
   private async runFetchCodexOnlyCycle(): Promise<void> {
-    const codexHomePath = this.codexHomePathResolver?.() ?? null
-    const codexProvenance = codexHomePath ? `managed:${codexHomePath}` : 'system'
+    const codexTarget = this.codexFetchTarget
+    const codexHomePath = this.codexHomePathResolver?.(codexTarget) ?? null
+    const codexProvenance = this.getCodexProvenance(codexTarget, codexHomePath)
     const codexGeneration = this.codexFetchGeneration
     const previousState = this.state
 
@@ -691,7 +740,10 @@ export class RateLimitService {
       codex: this.withFetchingStatus(previousState.codex, 'codex')
     })
 
-    const codex = await fetchCodexRateLimits({ codexHomePath }).catch(
+    const codex = await fetchCodexRateLimits({
+      codexHomePath,
+      allowPtyFallback: this.shouldAllowCodexPtyFallback()
+    }).catch(
       (err): ProviderRateLimits => ({
         provider: 'codex',
         session: null,
@@ -702,8 +754,8 @@ export class RateLimitService {
       })
     )
 
-    const latestCodexHomePath = this.codexHomePathResolver?.() ?? null
-    const latestCodexProvenance = latestCodexHomePath ? `managed:${latestCodexHomePath}` : 'system'
+    const latestCodexHomePath = this.codexHomePathResolver?.(codexTarget) ?? null
+    const latestCodexProvenance = this.getCodexProvenance(codexTarget, latestCodexHomePath)
     const shouldApplyCodex =
       codexGeneration === this.codexFetchGeneration && codexProvenance === latestCodexProvenance
 

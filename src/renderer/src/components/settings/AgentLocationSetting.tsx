@@ -17,6 +17,10 @@ type AgentLocationSettingProps = {
   wslCapabilitiesLoading?: boolean
 }
 
+function getHostRuntimeLabel(): string {
+  return navigator.userAgent.includes('Windows') ? 'Windows' : 'This device'
+}
+
 function getSelectedAgentRuntime(
   settings: GlobalSettings,
   wslAvailable: boolean,
@@ -36,7 +40,7 @@ function getSelectedAgentRuntime(
       label: selectedDistro ? `WSL ${selectedDistro}` : 'WSL default'
     }
   }
-  return { runtime: 'host', label: 'Windows' }
+  return { runtime: 'host', label: getHostRuntimeLabel() }
 }
 
 export function AgentLocationSetting({
@@ -70,7 +74,7 @@ export function AgentLocationSetting({
               onChange={(value) => updateAgentLocation({ localAgentRuntime: value })}
               equalWidth
               options={[
-                { value: 'host', label: 'Windows' },
+                { value: 'host', label: getHostRuntimeLabel() },
                 {
                   value: 'wsl',
                   label: 'WSL',

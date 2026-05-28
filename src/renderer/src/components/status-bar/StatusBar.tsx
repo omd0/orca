@@ -68,6 +68,10 @@ type CodexStatusSwitchGroup = {
   targets: CodexStatusSwitchTarget[]
 }
 
+function getHostRuntimeLabel(): string {
+  return navigator.userAgent.includes('Windows') ? 'Windows' : 'This device'
+}
+
 function getCodexAccountLabel(
   state: CodexRateLimitAccountsState,
   accountId: string | null | undefined
@@ -89,7 +93,7 @@ function getCodexStatusWslKey(wslDistro: string | null | undefined): string {
 
 function getCodexStatusRuntimeLabel(target: CodexStatusRuntimeTarget): string {
   if (target.runtime === 'host') {
-    return 'Windows'
+    return getHostRuntimeLabel()
   }
   return target.wslDistro ? `WSL ${target.wslDistro}` : 'WSL default'
 }
@@ -168,14 +172,6 @@ function buildCodexStatusSwitchGroups(
   }
 
   return groups
-}
-
-function getCodexStatusActiveSummary(groups: CodexStatusSwitchGroup[]): string {
-  const labels = groups.map((group) => {
-    const active = group.targets.find((target) => target.active)
-    return `${group.label}: ${active?.label ?? 'System default'}`
-  })
-  return labels.length > 0 ? labels.join(' / ') : 'System default'
 }
 
 function CodexRestartStatusPrompt(): React.JSX.Element | null {
@@ -683,7 +679,6 @@ function CodexSwitcherMenu({
   }, [accountsExpanded, fetchInactiveCodexAccountUsage])
 
   const switchGroups = buildCodexStatusSwitchGroups(accounts)
-  const activeAccountLabel = getCodexStatusActiveSummary(switchGroups)
 
   return (
     <ProviderDetailsMenu
@@ -701,9 +696,19 @@ function CodexSwitcherMenu({
           setAccountsExpanded((prev) => !prev)
         }}
       >
-        <span className="max-w-[180px] truncate text-[12px] text-foreground">
-          {activeAccountLabel}
-        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-0.5 text-[12px]">
+          {switchGroups.map((group) => {
+            const active = group.targets.find((target) => target.active)
+            return (
+              <div key={group.key} className="flex min-w-0 items-center gap-1.5">
+                <span className="shrink-0 text-muted-foreground">{group.label}:</span>
+                <span className="min-w-0 flex-1 truncate text-foreground">
+                  {active?.label ?? 'System default'}
+                </span>
+              </div>
+            )
+          })}
+        </div>
         {accountsExpanded ? (
           <ChevronDown className="ml-auto size-3.5 text-muted-foreground/85" />
         ) : (

@@ -1052,7 +1052,9 @@ app.whenReady().then(async () => {
   codexAccounts = new CodexAccountService(store, rateLimits, codexRuntimeHome)
   claudeRuntimeAuth = new ClaudeRuntimeAuthService(store)
   claudeAccounts = new ClaudeAccountService(store, rateLimits, claudeRuntimeAuth)
-  rateLimits.setCodexHomePathResolver(() => codexRuntimeHome!.prepareForRateLimitFetch())
+  rateLimits.setCodexHomePathResolver((target) =>
+    codexRuntimeHome!.prepareForRateLimitFetch(target)
+  )
   rateLimits.setClaudeAuthPreparationResolver(() => claudeRuntimeAuth!.prepareForRateLimitFetch())
   rateLimits.setSettingsResolver(() => store!.getSettings())
   keybindings = new KeybindingService({

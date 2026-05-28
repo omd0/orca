@@ -50,6 +50,10 @@ type AccountsPaneProps = {
   wslCapabilitiesLoading?: boolean
 }
 
+function getHostRuntimeLabel(): string {
+  return navigator.userAgent.includes('Windows') ? 'Windows' : 'This device'
+}
+
 function getCodexAccountLabel(
   state: CodexRateLimitAccountsState,
   accountId: string | null | undefined
@@ -92,7 +96,7 @@ function getCodexAccountRuntimeLabel(
   if (account.managedHomeRuntime === 'wsl') {
     return account.wslDistro ? `WSL ${account.wslDistro}` : 'WSL'
   }
-  return 'Windows'
+  return getHostRuntimeLabel()
 }
 
 function getClaudeAccountRuntimeLabel(
@@ -101,7 +105,7 @@ function getClaudeAccountRuntimeLabel(
   if (account.managedAuthRuntime === 'wsl') {
     return account.wslDistro ? `WSL ${account.wslDistro}` : 'WSL'
   }
-  return 'Windows'
+  return getHostRuntimeLabel()
 }
 
 function getCodexAccountErrorDescription(error: unknown): string {
@@ -189,7 +193,7 @@ function getSelectedAccountRuntime(
       label: selectedDistro ? `WSL ${selectedDistro}` : 'WSL default'
     }
   }
-  return { runtime: 'host', label: 'Windows' }
+  return { runtime: 'host', label: getHostRuntimeLabel() }
 }
 
 export function AccountsPane({
@@ -301,7 +305,7 @@ export function AccountsPane({
   const accountRuntimeControls = (
     <SearchableSetting
       title="Account Location"
-      description="Choose whether provider accounts are inspected and added in Windows or WSL."
+      description={`Choose whether provider accounts are inspected and added in ${getHostRuntimeLabel()} or WSL.`}
       keywords={['account', 'location', 'windows', 'wsl', 'linux', 'provider', 'auth']}
     >
       <SettingsRow
@@ -320,7 +324,7 @@ export function AccountsPane({
               onChange={(value) => updateSettings({ localAccountRuntime: value })}
               equalWidth
               options={[
-                { value: 'host', label: 'Windows' },
+                { value: 'host', label: getHostRuntimeLabel() },
                 {
                   value: 'wsl',
                   label: 'WSL',
