@@ -222,6 +222,7 @@ describe('LocalPtyProvider', () => {
       const spawnCall = spawnMock.mock.calls.at(-1)!
       expect(spawnCall[0]).toBe('wsl.exe')
       expect(spawnCall[2].env.CODEX_HOME).toBe('/home/jin/.codex-alt')
+      expect(spawnCall[2].env.WSLENV).toContain('CODEX_HOME')
     })
 
     it('translates a WSL managed Codex home before launching a WSL terminal', async () => {
@@ -248,6 +249,8 @@ describe('LocalPtyProvider', () => {
       expect(spawnCall[2].env.ORCA_CODEX_HOME).toBe(
         '/home/jin/.local/share/orca/codex-accounts/a/home'
       )
+      expect(spawnCall[2].env.WSLENV).toContain('CODEX_HOME')
+      expect(spawnCall[2].env.WSLENV).toContain('ORCA_CODEX_HOME')
     })
 
     it('does not pass a WSL managed Codex home into a different WSL distro', async () => {

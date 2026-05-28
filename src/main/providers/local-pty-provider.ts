@@ -32,6 +32,7 @@ import {
 } from './local-pty-shell-ready'
 import { removeInheritedNoColor } from '../pty/terminal-color-env'
 import { isHostCodexHomeForWsl, isWslCodexHomeForHost } from '../pty/codex-home-wsl-env'
+import { addWslEnvKeys } from '../wsl-env'
 
 const PANE_IDENTITY_ENV_KEYS = ['ORCA_PANE_KEY', 'ORCA_TAB_ID', 'ORCA_WORKTREE_ID'] as const
 
@@ -325,6 +326,8 @@ export class LocalPtyProvider implements IPtyProvider {
           } else {
             finalEnv.CODEX_HOME = codexHomeWslInfo.linuxPath
             finalEnv.ORCA_CODEX_HOME = codexHomeWslInfo.linuxPath
+            // Why: wsl.exe only imports non-default env vars named in WSLENV.
+            addWslEnvKeys(finalEnv, ['CODEX_HOME', 'ORCA_CODEX_HOME'])
             if (!launchWslDistro) {
               const resolved = resolveWindowsShellLaunchArgs(shellPath, cwd, defaultCwd, {
                 distro: codexHomeWslInfo.distro
@@ -339,6 +342,8 @@ export class LocalPtyProvider implements IPtyProvider {
           // must use its Linux-side ~/.codex instead of a Windows path.
           delete finalEnv.CODEX_HOME
           delete finalEnv.ORCA_CODEX_HOME
+        } else if (finalEnv.CODEX_HOME) {
+          addWslEnvKeys(finalEnv, ['CODEX_HOME', 'ORCA_CODEX_HOME'])
         }
       } else if (codexHomeWslInfo || isWslCodexHomeForHost(finalEnv.CODEX_HOME)) {
         // Why: WSL-managed Codex homes are Linux paths. Windows Codex cannot use

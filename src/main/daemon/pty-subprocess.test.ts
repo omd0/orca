@@ -1048,7 +1048,8 @@ describe('createPtySubprocess', () => {
       expect.objectContaining({
         env: expect.objectContaining({
           CODEX_HOME: '/home/jin/.local/share/orca/codex-accounts/a/home',
-          ORCA_CODEX_HOME: '/home/jin/.local/share/orca/codex-accounts/a/home'
+          ORCA_CODEX_HOME: '/home/jin/.local/share/orca/codex-accounts/a/home',
+          WSLENV: expect.stringContaining('CODEX_HOME')
         })
       })
     )
