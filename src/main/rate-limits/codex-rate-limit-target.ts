@@ -1,0 +1,51 @@
+import type { GlobalSettings } from '../../shared/types'
+import {
+  getWslSelectionKey,
+  normalizeCodexRuntimeSelection,
+  type CodexAccountSelectionTarget
+} from '../codex-accounts/runtime-selection'
+
+function normalizeOptionalDistro(value: string | null | undefined): string | null {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : null
+}
+
+export function getInitialCodexRateLimitTarget(
+  settings: GlobalSettings,
+  platform: NodeJS.Platform = process.platform
+): CodexAccountSelectionTarget {
+  if (settings.localAgentRuntime === 'host') {
+    return { runtime: 'host' }
+  }
+  if (
+    settings.localAgentRuntime === 'wsl' ||
+    (settings.localAgentRuntime == null &&
+      platform === 'win32' &&
+      settings.terminalWindowsShell === 'wsl.exe')
+  ) {
+    return {
+      runtime: 'wsl',
+      wslDistro:
+        normalizeOptionalDistro(settings.localAgentWslDistro) ??
+        normalizeOptionalDistro(settings.terminalWindowsWslDistro)
+    }
+  }
+
+  const selection = normalizeCodexRuntimeSelection(settings)
+  if (!selection.host) {
+    const selectedWslEntries = Object.entries(selection.wsl).filter(([, accountId]) =>
+      Boolean(accountId)
+    )
+    if (selectedWslEntries.length === 1) {
+      const [distroKey] = selectedWslEntries[0]
+      // Why: after restart there is no last-clicked switcher target, but a
+      // single WSL-only active account is the least surprising quota context.
+      return {
+        runtime: 'wsl',
+        wslDistro: distroKey === getWslSelectionKey(null) ? null : distroKey
+      }
+    }
+  }
+
+  return { runtime: 'host' }
+}

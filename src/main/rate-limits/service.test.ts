@@ -248,6 +248,26 @@ describe('RateLimitService', () => {
     )
   })
 
+  it('uses the initialized WSL target for active Codex rate-limit fetches', async () => {
+    const service = new RateLimitService()
+    const wslCodexHome =
+      '\\\\wsl.localhost\\Ubuntu\\home\\jin\\.local\\share\\orca\\codex-accounts\\a\\home'
+    const hostCodexHome = 'C:\\Users\\jin\\.orca\\codex-accounts\\host\\home'
+    const resolver = vi.fn((target) => (target?.runtime === 'wsl' ? wslCodexHome : hostCodexHome))
+    service.setCodexHomePathResolver(resolver)
+    service.setCodexFetchTarget({ runtime: 'wsl', wslDistro: 'Ubuntu' })
+
+    vi.mocked(fetchClaudeRateLimits).mockResolvedValueOnce(okProvider('claude', 10, Date.now()))
+    vi.mocked(fetchCodexRateLimits).mockResolvedValueOnce(okProvider('codex', 20, Date.now()))
+
+    await service.refresh()
+
+    expect(resolver).toHaveBeenCalledWith({ runtime: 'wsl', wslDistro: 'Ubuntu' })
+    expect(fetchCodexRateLimits).toHaveBeenCalledWith(
+      expect.objectContaining({ codexHomePath: wslCodexHome })
+    )
+  })
+
   it('does not cache host Codex usage under an outgoing WSL account', async () => {
     const service = new RateLimitService()
     const wslCodexHome =

@@ -101,6 +101,10 @@ export class RateLimitService {
     this.codexHomePathResolver = resolver
   }
 
+  setCodexFetchTarget(target?: CodexAccountSelectionTarget): void {
+    this.codexFetchTarget = normalizeCodexAccountSelectionTarget(target)
+  }
+
   setClaudeAuthPreparationResolver(resolver: () => Promise<ClaudeRuntimeAuthPreparation>): void {
     this.claudeAuthPreparationResolver = resolver
   }

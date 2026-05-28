@@ -57,6 +57,7 @@ import { getDevInstanceIdentity } from './startup/dev-instance-identity'
 import { hydrateShellPath, mergePathSegments } from './startup/hydrate-shell-path'
 import { acquireSingleInstanceLock } from './startup/single-instance-lock'
 import { RateLimitService } from './rate-limits/service'
+import { getInitialCodexRateLimitTarget } from './rate-limits/codex-rate-limit-target'
 import { attachMainWindowServices } from './window/attach-main-window-services'
 import { createMainWindow, loadMainWindow } from './window/createMainWindow'
 import { CodexAccountService } from './codex-accounts/service'
@@ -1055,6 +1056,7 @@ app.whenReady().then(async () => {
   rateLimits.setCodexHomePathResolver((target) =>
     codexRuntimeHome!.prepareForRateLimitFetch(target)
   )
+  rateLimits.setCodexFetchTarget(getInitialCodexRateLimitTarget(store.getSettings()))
   rateLimits.setClaudeAuthPreparationResolver(() => claudeRuntimeAuth!.prepareForRateLimitFetch())
   rateLimits.setSettingsResolver(() => store!.getSettings())
   keybindings = new KeybindingService({
