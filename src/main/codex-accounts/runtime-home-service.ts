@@ -25,6 +25,11 @@ import {
 import { syncSystemCodexSessionsIntoManagedHome } from '../codex/codex-session-bridge'
 import { syncSystemConfigIntoManagedCodexHome } from '../codex/codex-config-mirror'
 import { parseWslUncPath } from '../../shared/wsl-paths'
+import {
+  getSelectedCodexAccountIdForTarget,
+  normalizeCodexRuntimeSelection,
+  type CodexAccountSelectionTarget
+} from './runtime-selection'
 
 type CodexAuthIdentity = {
   email: string | null
@@ -80,24 +85,24 @@ export class CodexRuntimeHomeService {
     const settings = this.store.getSettings()
     const activeAccount = this.getActiveAccount(
       settings.codexManagedAccounts,
-      settings.activeCodexManagedAccountId
+      normalizeCodexRuntimeSelection(settings).host
     )
     // Why: WSL-managed homes are never materialized into host ~/.codex.
     // Treating one as "last synced" makes cold start look like a host-account
     // transition and can restore/delete host auth that Orca never touched.
     this.lastSyncedAccountId = this.getWslManagedHomePath(activeAccount)
       ? null
-      : settings.activeCodexManagedAccountId
+      : normalizeCodexRuntimeSelection(settings).host
   }
 
-  prepareForCodexLaunch(): string {
-    const activeAccount = this.getActiveAccount(
-      this.store.getSettings().codexManagedAccounts,
-      this.store.getSettings().activeCodexManagedAccountId
-    )
-    const wslHome = this.getWslManagedHomePath(activeAccount)
-    if (wslHome) {
-      return wslHome
+  prepareForCodexLaunch(target?: CodexAccountSelectionTarget): string | null {
+    if (target?.runtime === 'wsl') {
+      const settings = this.store.getSettings()
+      const activeAccount = this.getActiveAccount(
+        settings.codexManagedAccounts,
+        getSelectedCodexAccountIdForTarget(settings, target)
+      )
+      return this.getWslManagedHomePath(activeAccount)
     }
     this.syncForCurrentSelection()
     syncSystemCodexResourcesIntoManagedHome()
@@ -107,14 +112,6 @@ export class CodexRuntimeHomeService {
   }
 
   prepareForRateLimitFetch(): string {
-    const activeAccount = this.getActiveAccount(
-      this.store.getSettings().codexManagedAccounts,
-      this.store.getSettings().activeCodexManagedAccountId
-    )
-    const wslHome = this.getWslManagedHomePath(activeAccount)
-    if (wslHome) {
-      return wslHome
-    }
     this.syncForCurrentSelection()
     syncSystemCodexResourcesIntoManagedHome()
     syncSystemConfigIntoManagedCodexHome()
@@ -129,7 +126,7 @@ export class CodexRuntimeHomeService {
     }
     const activeAccount = this.getActiveAccount(
       settings.codexManagedAccounts,
-      settings.activeCodexManagedAccountId
+      normalizeCodexRuntimeSelection(settings).host
     )
     const previousAccount = this.getActiveAccount(
       settings.codexManagedAccounts,
@@ -159,8 +156,14 @@ export class CodexRuntimeHomeService {
       })
     }
     if (!activeAccount) {
-      if (settings.activeCodexManagedAccountId) {
-        this.store.updateSettings({ activeCodexManagedAccountId: null })
+      if (normalizeCodexRuntimeSelection(settings).host) {
+        this.store.updateSettings({
+          activeCodexManagedAccountId: null,
+          activeCodexManagedAccountIdsByRuntime: {
+            ...normalizeCodexRuntimeSelection(settings),
+            host: null
+          }
+        })
       }
       // Why: only restore the system-default mirror when transitioning FROM a
       // managed account. When no managed account was ever active, later syncs
@@ -207,7 +210,13 @@ export class CodexRuntimeHomeService {
       console.warn(
         '[codex-runtime-home] Active managed account is missing auth.json, restoring system default'
       )
-      this.store.updateSettings({ activeCodexManagedAccountId: null })
+      this.store.updateSettings({
+        activeCodexManagedAccountId: null,
+        activeCodexManagedAccountIdsByRuntime: {
+          ...normalizeCodexRuntimeSelection(settings),
+          host: null
+        }
+      })
       if (this.lastSyncedAccountId !== null) {
         this.restoreSystemDefaultSnapshot({ detectExternalLogin: true })
         this.lastSyncedAccountId = null
@@ -244,8 +253,10 @@ export class CodexRuntimeHomeService {
   // re-auth or add-account. Those flows write fresh tokens to managed storage,
   // so the read-back must be skipped to avoid overwriting them with stale
   // runtime tokens.
-  clearLastWrittenAuthJson(accountId = this.store.getSettings().activeCodexManagedAccountId): void {
-    if (accountId === this.store.getSettings().activeCodexManagedAccountId) {
+  clearLastWrittenAuthJson(
+    accountId = normalizeCodexRuntimeSelection(this.store.getSettings()).host
+  ): void {
+    if (accountId === normalizeCodexRuntimeSelection(this.store.getSettings()).host) {
       this.lastWrittenAuthJson = null
     }
     this.skipNextReadBackForAccountId = accountId

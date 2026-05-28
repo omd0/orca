@@ -1507,6 +1507,12 @@ export type CodexManagedAccountSummary = {
 export type CodexRateLimitAccountsState = {
   accounts: CodexManagedAccountSummary[]
   activeAccountId: string | null
+  activeAccountIdsByRuntime?: CodexManagedAccountRuntimeSelection
+}
+
+export type CodexManagedAccountRuntimeSelection = {
+  host: string | null
+  wsl: Record<string, string | null>
 }
 
 export type ClaudeManagedAccount = {
@@ -1822,6 +1828,7 @@ export type GlobalSettings = {
    *  and external terminal sessions. */
   codexManagedAccounts: CodexManagedAccount[]
   activeCodexManagedAccountId: string | null
+  activeCodexManagedAccountIdsByRuntime?: CodexManagedAccountRuntimeSelection
   /** Why: Claude Code keeps conversations under one shared config root. Orca
    *  persists only per-account auth material here so switching accounts does
    *  not fork prior chat/session context the way CLAUDE_CONFIG_DIR swapping would. */

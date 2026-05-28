@@ -1341,7 +1341,11 @@ export type PreloadApi = {
     }) => Promise<CodexRateLimitAccountsState>
     reauthenticate: (args: { accountId: string }) => Promise<CodexRateLimitAccountsState>
     remove: (args: { accountId: string }) => Promise<CodexRateLimitAccountsState>
-    select: (args: { accountId: string | null }) => Promise<CodexRateLimitAccountsState>
+    select: (args: {
+      accountId: string | null
+      runtime?: 'host' | 'wsl'
+      wslDistro?: string | null
+    }) => Promise<CodexRateLimitAccountsState>
   }
   claudeAccounts: {
     list: () => Promise<ClaudeRateLimitAccountsState>

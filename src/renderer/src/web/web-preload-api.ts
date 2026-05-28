@@ -1798,7 +1798,11 @@ function createRateLimitsApi(): NonNullable<Partial<PreloadApi>['rateLimits']> {
 }
 
 function createAccountsApi(): never {
-  const empty = { accounts: [], activeAccountId: null }
+  const empty = {
+    accounts: [],
+    activeAccountId: null,
+    activeAccountIdsByRuntime: { host: null, wsl: {} }
+  }
   return {
     list: () => Promise.resolve(empty),
     add: () => Promise.resolve(empty),

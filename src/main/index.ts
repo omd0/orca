@@ -61,6 +61,10 @@ import { attachMainWindowServices } from './window/attach-main-window-services'
 import { createMainWindow, loadMainWindow } from './window/createMainWindow'
 import { CodexAccountService } from './codex-accounts/service'
 import { CodexRuntimeHomeService } from './codex-accounts/runtime-home-service'
+import {
+  normalizeCodexRuntimeSelection,
+  type CodexAccountSelectionTarget
+} from './codex-accounts/runtime-selection'
 import { codexHookService } from './codex/hook-service'
 import { ClaudeAccountService } from './claude-accounts/service'
 import { ClaudeRuntimeAuthService } from './claude-accounts/runtime-auth-service'
@@ -307,8 +311,8 @@ if (hasSingleInstanceLock) {
   enableMainProcessGpuFeatures()
 }
 
-function prepareCodexRuntimeHomeForLaunch(): string {
-  const runtimeHomePath = codexRuntimeHome!.prepareForCodexLaunch()
+function prepareCodexRuntimeHomeForLaunch(target?: CodexAccountSelectionTarget): string | null {
+  const runtimeHomePath = codexRuntimeHome!.prepareForCodexLaunch(target)
   const hooksEnabled = isAgentStatusHooksEnabled(store?.getSettings())
   try {
     // Why: launch prep is reachable after startup via PTY/runtime paths; honor
@@ -1064,8 +1068,14 @@ app.whenReady().then(async () => {
   })
   rateLimits.setInactiveCodexAccountsResolver(() => {
     const settings = store!.getSettings()
+    const activeIds = new Set(
+      [
+        normalizeCodexRuntimeSelection(settings).host,
+        ...Object.values(normalizeCodexRuntimeSelection(settings).wsl)
+      ].filter(Boolean)
+    )
     return settings.codexManagedAccounts
-      .filter((account) => account.id !== settings.activeCodexManagedAccountId)
+      .filter((account) => !activeIds.has(account.id))
       .map((account) => ({ id: account.id, managedHomePath: account.managedHomePath }))
   })
   const runtimeService = new OrcaRuntimeService(store, stats, {

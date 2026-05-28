@@ -34,12 +34,13 @@ import type {
 } from '../../shared/mobile-markdown-document'
 import type { RuntimeMobileSessionTabMove } from '../../shared/runtime-types'
 import { requestMobileMarkdownFromRenderer } from './mobile-markdown-request-relay'
+import type { CodexAccountSelectionTarget } from '../codex-accounts/runtime-selection'
 
 export function attachMainWindowServices(
   mainWindow: BrowserWindow,
   store: Store,
   runtime: OrcaRuntimeService,
-  getSelectedCodexHomePath?: () => string | null,
+  getSelectedCodexHomePath?: (target?: CodexAccountSelectionTarget) => string | null,
   prepareClaudeAuth?: () => Promise<ClaudeRuntimeAuthPreparation>,
   options?: {
     onBeforeRendererReload?: (args: { webContentsId: number; ignoreCache: boolean }) => void

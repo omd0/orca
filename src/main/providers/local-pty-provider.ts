@@ -153,7 +153,7 @@ export type LocalPtyProviderOptions = {
   buildSpawnEnv?: (
     id: string,
     baseEnv: Record<string, string>,
-    ctx?: { command?: string; isWsl?: boolean }
+    ctx?: { command?: string; isWsl?: boolean; wslDistro?: string | null }
   ) => Record<string, string>
   /** Whether worktree-scoped shell history is enabled. When true (or absent)
    *  and a worktreeId is provided, HISTFILE is scoped per-worktree. */
@@ -306,15 +306,19 @@ export class LocalPtyProvider implements IPtyProvider {
     }
 
     const isWslShell = Boolean(wslInfo) || pathWin32.basename(shellPath).toLowerCase() === 'wsl.exe'
+    const launchWslDistro =
+      wslInfo?.distro ?? worktreeWslContext?.distro ?? preferredWslContext?.distro ?? null
     const finalEnv = this.opts.buildSpawnEnv
-      ? this.opts.buildSpawnEnv(id, spawnEnv, { command: args.command, isWsl: isWslShell })
+      ? this.opts.buildSpawnEnv(id, spawnEnv, {
+          command: args.command,
+          isWsl: isWslShell,
+          wslDistro: launchWslDistro
+        })
       : spawnEnv
     if (process.platform === 'win32') {
       const codexHomeWslInfo = finalEnv.CODEX_HOME ? parseWslPath(finalEnv.CODEX_HOME) : null
       if (pathWin32.basename(shellPath).toLowerCase() === 'wsl.exe') {
         if (codexHomeWslInfo) {
-          const launchWslDistro =
-            wslInfo?.distro ?? worktreeWslContext?.distro ?? preferredWslContext?.distro
           if (launchWslDistro && launchWslDistro !== codexHomeWslInfo.distro) {
             delete finalEnv.CODEX_HOME
             delete finalEnv.ORCA_CODEX_HOME

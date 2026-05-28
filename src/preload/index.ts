@@ -1408,8 +1408,11 @@ const api = {
       ipcRenderer.invoke('codexAccounts:reauthenticate', args),
     remove: (args: { accountId: string }): Promise<unknown> =>
       ipcRenderer.invoke('codexAccounts:remove', args),
-    select: (args: { accountId: string | null }): Promise<unknown> =>
-      ipcRenderer.invoke('codexAccounts:select', args)
+    select: (args: {
+      accountId: string | null
+      runtime?: 'host' | 'wsl'
+      wslDistro?: string | null
+    }): Promise<unknown> => ipcRenderer.invoke('codexAccounts:select', args)
   },
 
   claudeAccounts: {

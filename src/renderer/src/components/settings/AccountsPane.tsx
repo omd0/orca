@@ -60,6 +60,22 @@ function getCodexAccountLabel(
   return state.accounts.find((account) => account.id === accountId)?.email ?? 'Codex account'
 }
 
+function getActiveCodexAccountIdForRuntime(
+  state: CodexRateLimitAccountsState,
+  runtime: LocalAccountRuntime
+): string | null {
+  if (runtime.runtime === 'host') {
+    return state.activeAccountIdsByRuntime?.host ?? state.activeAccountId
+  }
+  if (runtime.wslDistro) {
+    return state.activeAccountIdsByRuntime?.wsl?.[runtime.wslDistro] ?? null
+  }
+  const selectedIds = Array.from(
+    new Set(Object.values(state.activeAccountIdsByRuntime?.wsl ?? {}).filter(Boolean))
+  )
+  return selectedIds.length === 1 ? selectedIds[0] : null
+}
+
 function getClaudeAccountLabel(
   state: ClaudeRateLimitAccountsState,
   accountId: string | null | undefined
@@ -191,7 +207,8 @@ export function AccountsPane({
 
   const [codexAccounts, setCodexAccounts] = useState<CodexRateLimitAccountsState>({
     accounts: [],
-    activeAccountId: null
+    activeAccountId: null,
+    activeAccountIdsByRuntime: { host: null, wsl: {} }
   })
   const [codexAction, setCodexAction] = useState<
     'idle' | 'adding' | `reauth:${string}` | `remove:${string}` | `select:${string | 'system'}`
@@ -211,6 +228,7 @@ export function AccountsPane({
   const visibleCodexAccounts = codexAccounts.accounts.filter((account) =>
     accountMatchesRuntime(account, accountRuntime)
   )
+  const activeCodexAccountId = getActiveCodexAccountIdForRuntime(codexAccounts, accountRuntime)
 
   const recordOpenCodeSettingEdit = (field: 'cookie' | 'workspaceId'): void => {
     if (recordedOpenCodeSettingEditsRef.current.has(field)) {
@@ -346,23 +364,24 @@ export function AccountsPane({
     action: typeof codexAction,
     operation: () => Promise<CodexRateLimitAccountsState>
   ): Promise<void> => {
-    const previousActiveAccountId = codexAccounts.activeAccountId
+    const previousActiveAccountId = getActiveCodexAccountIdForRuntime(codexAccounts, accountRuntime)
     setCodexAction(action)
     try {
       const next = await operation()
       await syncCodexAccounts(next)
       recordFeatureInteraction('codex-account-switching')
+      const nextActiveAccountId = getActiveCodexAccountIdForRuntime(next, accountRuntime)
       const shouldPromptRestart =
         action === 'adding' ||
-        (action.startsWith('select:') && previousActiveAccountId !== next.activeAccountId) ||
+        (action.startsWith('select:') && previousActiveAccountId !== nextActiveAccountId) ||
         (action.startsWith('reauth:') &&
-          next.activeAccountId !== null &&
-          action === `reauth:${next.activeAccountId}`) ||
-        (action.startsWith('remove:') && previousActiveAccountId !== next.activeAccountId)
+          nextActiveAccountId !== null &&
+          action === `reauth:${nextActiveAccountId}`) ||
+        (action.startsWith('remove:') && previousActiveAccountId !== nextActiveAccountId)
       if (shouldPromptRestart) {
         void markLiveCodexSessionsForRestart({
           previousAccountLabel: getCodexAccountLabel(codexAccounts, previousActiveAccountId),
-          nextAccountLabel: getCodexAccountLabel(next, next.activeAccountId)
+          nextAccountLabel: getCodexAccountLabel(next, nextActiveAccountId)
         })
       }
     } catch (error) {
@@ -653,12 +672,16 @@ export function AccountsPane({
               type="button"
               onClick={() =>
                 void runCodexAccountAction('select:system', () =>
-                  window.api.codexAccounts.select({ accountId: null })
+                  window.api.codexAccounts.select({
+                    accountId: null,
+                    runtime: accountRuntime.runtime,
+                    wslDistro: accountRuntime.wslDistro
+                  })
                 )
               }
               disabled={codexAction !== 'idle'}
               className={`flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2.5 text-left transition-colors ${
-                codexAccounts.activeAccountId === null
+                activeCodexAccountId === null
                   ? 'border-foreground/20 bg-accent/15'
                   : 'border-border/70 hover:border-border hover:bg-accent/8'
               } disabled:cursor-default disabled:opacity-100`}
@@ -666,7 +689,7 @@ export function AccountsPane({
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="truncate text-sm font-medium">System default</span>
-                  {codexAccounts.activeAccountId === null ? (
+                  {activeCodexAccountId === null ? (
                     <Badge
                       variant="outline"
                       className="h-4 shrink-0 rounded px-1.5 text-[10px] font-medium leading-none text-foreground/80"
@@ -687,7 +710,7 @@ export function AccountsPane({
               </div>
             ) : (
               visibleCodexAccounts.map((account) => {
-                const isActive = codexAccounts.activeAccountId === account.id
+                const isActive = activeCodexAccountId === account.id
                 const isReauthing = codexAction === `reauth:${account.id}`
                 const isRemoving = codexAction === `remove:${account.id}`
                 const isBusy = codexAction !== 'idle'
@@ -706,7 +729,11 @@ export function AccountsPane({
                         type="button"
                         onClick={() =>
                           void runCodexAccountAction(`select:${account.id}`, () =>
-                            window.api.codexAccounts.select({ accountId: account.id })
+                            window.api.codexAccounts.select({
+                              accountId: account.id,
+                              runtime: account.managedHomeRuntime ?? 'host',
+                              wslDistro: account.wslDistro ?? null
+                            })
                           )
                         }
                         disabled={isBusy}

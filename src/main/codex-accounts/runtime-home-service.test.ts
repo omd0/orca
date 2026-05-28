@@ -478,7 +478,9 @@ describe('CodexRuntimeHomeService', () => {
     const { CodexRuntimeHomeService } = await import('./runtime-home-service')
     new CodexRuntimeHomeService(store as never)
 
-    expect(store.updateSettings).toHaveBeenCalledWith({ activeCodexManagedAccountId: null })
+    expect(store.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ activeCodexManagedAccountId: null })
+    )
     expect(existsSync(runtimeAuthPath)).toBe(false)
     expect(warnSpy).toHaveBeenCalled()
   })
@@ -516,7 +518,9 @@ describe('CodexRuntimeHomeService', () => {
     const { CodexRuntimeHomeService } = await import('./runtime-home-service')
     new CodexRuntimeHomeService(store as never)
 
-    expect(store.updateSettings).toHaveBeenCalledWith({ activeCodexManagedAccountId: null })
+    expect(store.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ activeCodexManagedAccountId: null })
+    )
     expect(readFileSync(runtimeAuthPath, 'utf-8')).toBe(systemAuth)
     expect(warnSpy).toHaveBeenCalled()
   })
@@ -532,7 +536,9 @@ describe('CodexRuntimeHomeService', () => {
     const { CodexRuntimeHomeService } = await import('./runtime-home-service')
     new CodexRuntimeHomeService(store as never)
 
-    expect(store.updateSettings).toHaveBeenCalledWith({ activeCodexManagedAccountId: null })
+    expect(store.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ activeCodexManagedAccountId: null })
+    )
     expect(existsSync(runtimeAuthPath)).toBe(false)
   })
 
@@ -694,7 +700,8 @@ describe('CodexRuntimeHomeService', () => {
           lastAuthenticatedAt: 1
         }
       ],
-      activeCodexManagedAccountId: 'account-1'
+      activeCodexManagedAccountId: null,
+      activeCodexManagedAccountIdsByRuntime: { host: null, wsl: { Ubuntu: 'account-1' } }
     })
     const store = createStore(settings)
 
@@ -702,8 +709,11 @@ describe('CodexRuntimeHomeService', () => {
     const service = new CodexRuntimeHomeService(store as never)
 
     expect(readFileSync(runtimeAuthPath, 'utf-8')).toBe('{"account":"host-system"}\n')
-    expect(service.prepareForCodexLaunch()).toBe(wslManagedHomePath)
-    expect(service.prepareForRateLimitFetch()).toBe(wslManagedHomePath)
+    expect(service.prepareForCodexLaunch()).toBe(getRuntimeCodexHomePath())
+    expect(service.prepareForCodexLaunch({ runtime: 'wsl', wslDistro: 'Ubuntu' })).toBe(
+      wslManagedHomePath
+    )
+    expect(service.prepareForRateLimitFetch()).toBe(getRuntimeCodexHomePath())
   })
 
   it('does not overwrite auth.json when no managed account was ever active', async () => {
@@ -1031,7 +1041,9 @@ describe('CodexRuntimeHomeService', () => {
     const { CodexRuntimeHomeService } = await import('./runtime-home-service')
     new CodexRuntimeHomeService(store as never)
 
-    expect(store.updateSettings).toHaveBeenCalledWith({ activeCodexManagedAccountId: null })
+    expect(store.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ activeCodexManagedAccountId: null })
+    )
     expect(existsSync(runtimeAuthPath)).toBe(false)
     expect(warnSpy).toHaveBeenCalled()
   })

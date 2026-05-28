@@ -21,6 +21,16 @@ import type { RateLimitService } from '../rate-limits/service'
 import { parseWslUncPath } from '../../shared/wsl-paths'
 import { toWindowsWslPath } from '../wsl'
 import { buildEncodedWslBashCommand } from '../wsl-bash-command'
+import {
+  getCodexSelectionTargetForAccount,
+  getSelectedCodexAccountIdForTarget,
+  normalizeCodexAccountSelectionTarget,
+  normalizeCodexRuntimeSelection,
+  pruneInvalidCodexRuntimeSelection,
+  removeCodexAccountIdFromSelection,
+  setSelectedCodexAccountIdForTarget,
+  type CodexAccountSelectionTarget
+} from './runtime-selection'
 
 const LOGIN_TIMEOUT_MS = 120_000
 const MAX_LOGIN_OUTPUT_CHARS = 4_000
@@ -94,6 +104,13 @@ export class CodexAccountService {
     return this.serializeMutation(() => this.doSelectAccount(accountId))
   }
 
+  async selectAccountForTarget(
+    accountId: string | null,
+    target?: CodexAccountSelectionTarget
+  ): Promise<CodexRateLimitAccountsState> {
+    return this.serializeMutation(() => this.doSelectAccount(accountId, target))
+  }
+
   private async doAddAccount(target?: CodexAccountAddTarget): Promise<CodexRateLimitAccountsState> {
     const accountId = randomUUID()
     const managedHome = this.createManagedHome(accountId, target)
@@ -124,9 +141,17 @@ export class CodexAccountService {
       }
 
       const settings = this.store.getSettings()
+      const selection = normalizeCodexRuntimeSelection(settings)
+      const targetSelection = getCodexSelectionTargetForAccount(account)
       this.store.updateSettings({
         codexManagedAccounts: [...settings.codexManagedAccounts, account],
-        activeCodexManagedAccountId: account.id
+        activeCodexManagedAccountId:
+          targetSelection.runtime === 'host' ? account.id : selection.host,
+        activeCodexManagedAccountIdsByRuntime: setSelectedCodexAccountIdForTarget(
+          selection,
+          account.id,
+          targetSelection
+        )
       })
       this.safeSyncCanonicalConfigToManagedHomes()
       this.runtimeHome.clearLastWrittenAuthJson(account.id)
@@ -134,7 +159,7 @@ export class CodexAccountService {
 
       // Why: the new account becomes active, so the previous active account is
       // now inactive and its last-known usage should be cached for the switcher.
-      const outgoingAccountId = settings.activeCodexManagedAccountId
+      const outgoingAccountId = getSelectedCodexAccountIdForTarget(settings, targetSelection)
       await this.rateLimits.refreshForCodexAccountChange(outgoingAccountId)
       return this.getSnapshot()
     } catch (error) {
@@ -187,14 +212,17 @@ export class CodexAccountService {
     const account = this.requireAccount(accountId)
     const settings = this.store.getSettings()
     const nextAccounts = settings.codexManagedAccounts.filter((entry) => entry.id !== accountId)
+    const nextSelection = removeCodexAccountIdFromSelection(
+      normalizeCodexRuntimeSelection(settings),
+      accountId
+    )
     const nextActiveId =
-      settings.activeCodexManagedAccountId === accountId
-        ? null
-        : settings.activeCodexManagedAccountId
+      settings.activeCodexManagedAccountId === accountId ? null : nextSelection.host
 
     this.store.updateSettings({
       codexManagedAccounts: nextAccounts,
-      activeCodexManagedAccountId: nextActiveId
+      activeCodexManagedAccountId: nextActiveId,
+      activeCodexManagedAccountIdsByRuntime: nextSelection
     })
     this.runtimeHome.syncForCurrentSelection()
 
@@ -210,16 +238,35 @@ export class CodexAccountService {
     return this.getSnapshot()
   }
 
-  private async doSelectAccount(accountId: string | null): Promise<CodexRateLimitAccountsState> {
+  private async doSelectAccount(
+    accountId: string | null,
+    target?: CodexAccountSelectionTarget
+  ): Promise<CodexRateLimitAccountsState> {
+    let effectiveTarget = target
     if (accountId !== null) {
-      this.requireAccount(accountId)
+      const account = this.requireAccount(accountId)
+      const accountTarget = getCodexSelectionTargetForAccount(account)
+      const requestedTarget = normalizeCodexAccountSelectionTarget(target ?? accountTarget)
+      const normalizedAccountTarget = normalizeCodexAccountSelectionTarget(accountTarget)
+      if (
+        requestedTarget.runtime !== normalizedAccountTarget.runtime ||
+        (requestedTarget.wslDistro !== null &&
+          requestedTarget.wslDistro !== normalizedAccountTarget.wslDistro)
+      ) {
+        throw new Error('That Codex account belongs to a different runtime.')
+      }
+      effectiveTarget = accountTarget
     }
 
     const previousSettings = this.store.getSettings()
-    const outgoingAccountId = previousSettings.activeCodexManagedAccountId
+    const selection = normalizeCodexRuntimeSelection(previousSettings)
+    const outgoingAccountId = getSelectedCodexAccountIdForTarget(previousSettings, effectiveTarget)
+    const nextSelection = setSelectedCodexAccountIdForTarget(selection, accountId, effectiveTarget)
 
     this.store.updateSettings({
-      activeCodexManagedAccountId: accountId
+      activeCodexManagedAccountId:
+        effectiveTarget?.runtime === 'wsl' ? nextSelection.host : accountId,
+      activeCodexManagedAccountIdsByRuntime: nextSelection
     })
     this.safeSyncCanonicalConfigToManagedHomes()
     this.runtimeHome.syncForCurrentSelection()
@@ -234,7 +281,8 @@ export class CodexAccountService {
       accounts: settings.codexManagedAccounts
         .map((account) => this.toSummary(account))
         .sort((a, b) => b.updatedAt - a.updatedAt),
-      activeAccountId: settings.activeCodexManagedAccountId
+      activeAccountId: normalizeCodexRuntimeSelection(settings).host,
+      activeAccountIdsByRuntime: normalizeCodexRuntimeSelection(settings)
     }
   }
 
@@ -264,14 +312,19 @@ export class CodexAccountService {
 
   private normalizeActiveSelection(): void {
     const settings = this.store.getSettings()
-    if (!settings.activeCodexManagedAccountId) {
-      return
-    }
-    const hasActiveAccount = settings.codexManagedAccounts.some(
-      (entry) => entry.id === settings.activeCodexManagedAccountId
+    const selection = normalizeCodexRuntimeSelection(settings)
+    const nextSelection = pruneInvalidCodexRuntimeSelection(
+      selection,
+      settings.codexManagedAccounts
     )
-    if (!hasActiveAccount) {
-      this.store.updateSettings({ activeCodexManagedAccountId: null })
+    const changed =
+      nextSelection.host !== selection.host ||
+      JSON.stringify(nextSelection.wsl) !== JSON.stringify(selection.wsl)
+    if (changed) {
+      this.store.updateSettings({
+        activeCodexManagedAccountId: nextSelection.host,
+        activeCodexManagedAccountIdsByRuntime: nextSelection
+      })
     }
   }
 

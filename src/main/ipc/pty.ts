@@ -56,6 +56,7 @@ import {
 } from '../agent-hooks/migration-unsupported-pty-state'
 import { parseWslPath } from '../wsl'
 import { mergePersistedWindowsPath } from '../pty/windows-environment-path'
+import type { CodexAccountSelectionTarget } from '../codex-accounts/runtime-selection'
 
 // ─── Provider Registry ──────────────────────────────────────────────
 // Routes PTY operations by connectionId. null = local provider.
@@ -286,6 +287,19 @@ function shouldSkipCodexHomeEnvForWindowsShell(
 }
 
 const CODEX_HOME_ENV_KEYS = ['CODEX_HOME', 'ORCA_CODEX_HOME'] as const
+type GetSelectedCodexHomePath = (target?: CodexAccountSelectionTarget) => string | null
+
+function getCodexSelectionTargetForPty(
+  shellPath: string | undefined,
+  cwd: string | undefined,
+  wslDistro?: string | null
+): CodexAccountSelectionTarget {
+  const wslPath = typeof cwd === 'string' ? parseWslPath(cwd) : null
+  if (isWslShellName(shellPath) || wslPath) {
+    return { runtime: 'wsl', wslDistro: wslDistro ?? wslPath?.distro ?? null }
+  }
+  return { runtime: 'host' }
+}
 
 function readEnvWithProcessFallback(
   baseEnv: Record<string, string>,
@@ -795,7 +809,7 @@ export function unbindLocalProviderListeners(): void {
 export function registerPtyHandlers(
   mainWindow: BrowserWindow,
   runtime?: OrcaRuntimeService,
-  getSelectedCodexHomePath?: () => string | null,
+  getSelectedCodexHomePath?: GetSelectedCodexHomePath,
   getSettings?: () => GlobalSettings,
   prepareClaudeAuth?: () => Promise<ClaudeRuntimeAuthPreparation>,
   store?: Store
@@ -832,13 +846,16 @@ export function registerPtyHandlers(
           : undefined,
       pwshAvailable: () => isPwshAvailable(),
       buildSpawnEnv: (id, baseEnv, ctx) => {
+        const codexSelectionTarget: CodexAccountSelectionTarget =
+          ctx?.isWsl === true
+            ? { runtime: 'wsl', wslDistro: ctx.wslDistro ?? null }
+            : { runtime: 'host' }
+        const selectedCodexHomePath = getSelectedCodexHomePath?.(codexSelectionTarget) ?? null
         const env = buildPtyHostEnv(id, baseEnv, {
           isPackaged: app.isPackaged,
           userDataPath: app.getPath('userData'),
-          selectedCodexHomePath: getSelectedCodexHomePath?.() ?? null,
-          // Why: WSL's inner shell cannot use a Windows userData CODEX_HOME.
-          // Leave Linux Codex on its native ~/.codex until we own a WSL home.
-          skipCodexHomeEnv: ctx?.isWsl === true,
+          selectedCodexHomePath,
+          skipCodexHomeEnv: ctx?.isWsl === true && !selectedCodexHomePath,
           githubAttributionEnabled: getSettings?.()?.enableGitHubAttribution ?? false,
           launchCommand: ctx?.command,
           agentStatusHooksEnabled: isAgentStatusHooksEnabled(getSettings?.())
@@ -1199,8 +1216,18 @@ export function registerPtyHandlers(
         process.platform === 'win32' && !args.connectionId
           ? getSettings?.()?.terminalWindowsShell
           : undefined
+      const codexSelectionTarget = getCodexSelectionTargetForPty(
+        daemonShellOverride,
+        args.cwd,
+        getSettings?.()?.terminalWindowsWslDistro ?? null
+      )
+      const selectedCodexHomePath = isDaemonHostSpawn
+        ? (getSelectedCodexHomePath?.(codexSelectionTarget) ?? null)
+        : null
       const skipCodexHomeEnv =
-        isDaemonHostSpawn && shouldSkipCodexHomeEnvForWindowsShell(daemonShellOverride, args.cwd)
+        isDaemonHostSpawn &&
+        shouldSkipCodexHomeEnvForWindowsShell(daemonShellOverride, args.cwd) &&
+        !selectedCodexHomePath
       if (isDaemonHostSpawn && sessionId) {
         if (!isSafePtySessionId(sessionId, app.getPath('userData'))) {
           throw new Error('Invalid PTY session id')
@@ -1208,7 +1235,7 @@ export function registerPtyHandlers(
         env = buildPtyHostEnv(sessionId, env ?? {}, {
           isPackaged: app.isPackaged,
           userDataPath: app.getPath('userData'),
-          selectedCodexHomePath: getSelectedCodexHomePath?.() ?? null,
+          selectedCodexHomePath,
           skipCodexHomeEnv,
           githubAttributionEnabled: getSettings?.()?.enableGitHubAttribution ?? false,
           launchCommand: args.command,
@@ -1603,8 +1630,18 @@ export function registerPtyHandlers(
         (process.platform === 'win32' && !args.connectionId
           ? getSettings?.()?.terminalWindowsShell
           : undefined)
+      const codexSelectionTarget = getCodexSelectionTargetForPty(
+        effectiveShellOverride,
+        args.cwd,
+        getSettings?.()?.terminalWindowsWslDistro ?? null
+      )
+      const selectedCodexHomePath = isDaemonHostSpawn
+        ? (getSelectedCodexHomePath?.(codexSelectionTarget) ?? null)
+        : null
       const skipCodexHomeEnv =
-        isDaemonHostSpawn && shouldSkipCodexHomeEnvForWindowsShell(effectiveShellOverride, args.cwd)
+        isDaemonHostSpawn &&
+        shouldSkipCodexHomeEnvForWindowsShell(effectiveShellOverride, args.cwd) &&
+        !selectedCodexHomePath
       if (isDaemonHostSpawn) {
         if (effectiveSessionId === undefined) {
           // Should be unreachable: the expression above returns a string when
@@ -1628,7 +1665,7 @@ export function registerPtyHandlers(
           buildPtyHostEnv(sessionIdForEnv, env, {
             isPackaged: app.isPackaged,
             userDataPath: app.getPath('userData'),
-            selectedCodexHomePath: getSelectedCodexHomePath?.() ?? null,
+            selectedCodexHomePath,
             skipCodexHomeEnv,
             githubAttributionEnabled: getSettings?.()?.enableGitHubAttribution ?? false,
             launchCommand: args.command,
@@ -2219,7 +2256,7 @@ export function registerPtyHandlers(
 
 export function registerHeadlessPtyRuntime(
   runtime: OrcaRuntimeService,
-  getSelectedCodexHomePath?: () => string | null,
+  getSelectedCodexHomePath?: GetSelectedCodexHomePath,
   getSettings?: () => GlobalSettings,
   prepareClaudeAuth?: () => Promise<ClaudeRuntimeAuthPreparation>,
   store?: Store
