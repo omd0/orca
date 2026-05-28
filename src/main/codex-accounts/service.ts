@@ -199,7 +199,7 @@ export class CodexAccountService {
     })
     this.safeSyncCanonicalConfigToManagedHomes()
     this.runtimeHome.clearLastWrittenAuthJson(accountId)
-    this.runtimeHome.syncForCurrentSelection()
+    this.runtimeHome.syncForCurrentSelection(getCodexSelectionTargetForAccount(account))
 
     // Why: re-auth can change which actual Codex identity the managed home
     // points at. Force a fresh read immediately so the status bar cannot keep
@@ -274,7 +274,7 @@ export class CodexAccountService {
       activeCodexManagedAccountIdsByRuntime: nextSelection
     })
     this.safeSyncCanonicalConfigToManagedHomes()
-    this.runtimeHome.syncForCurrentSelection()
+    this.runtimeHome.syncForCurrentSelection(effectiveTarget)
 
     await this.rateLimits.refreshForCodexAccountChange(outgoingAccountId, effectiveTarget)
     return this.getSnapshot()
