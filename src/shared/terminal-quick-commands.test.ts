@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   buildTerminalQuickCommandInput,
   flattenTerminalQuickCommand,
+  getTerminalQuickCommandAction,
+  getTerminalQuickCommandBody,
   getDefaultTerminalQuickCommands,
+  isTerminalQuickCommandComplete,
   normalizeTerminalQuickCommands,
   terminalQuickCommandMatchesRepo
 } from './terminal-quick-commands'
@@ -49,6 +52,7 @@ describe('terminal quick commands', () => {
       {
         id: 'status',
         label: 'Status',
+        action: 'terminal-command',
         command: 'git status',
         appendEnter: false,
         scope: { type: 'global' }
@@ -56,6 +60,7 @@ describe('terminal quick commands', () => {
       {
         id: 'empty-command',
         label: 'Empty',
+        action: 'terminal-command',
         command: '',
         appendEnter: true,
         scope: { type: 'global' }
@@ -63,6 +68,7 @@ describe('terminal quick commands', () => {
       {
         id: 'status-2',
         label: 'Duplicate',
+        action: 'terminal-command',
         command: 'pwd',
         appendEnter: true,
         scope: { type: 'global' }
@@ -70,6 +76,7 @@ describe('terminal quick commands', () => {
       {
         id: 'quick-command-4',
         label: 'No ID',
+        action: 'terminal-command',
         command: 'date',
         appendEnter: true,
         scope: { type: 'global' }
@@ -97,6 +104,7 @@ describe('terminal quick commands', () => {
       {
         id: 'repo-dev',
         label: 'Dev',
+        action: 'terminal-command',
         command: 'pnpm dev',
         appendEnter: true,
         scope: { type: 'repo', repoId: 'repo-1' }
@@ -104,8 +112,40 @@ describe('terminal quick commands', () => {
       {
         id: 'bad-repo',
         label: 'Bad',
+        action: 'terminal-command',
         command: 'echo bad',
         appendEnter: true,
+        scope: { type: 'global' }
+      }
+    ])
+  })
+
+  it('normalizes agent prompt commands without storing generated shell text', () => {
+    expect(
+      normalizeTerminalQuickCommands([
+        {
+          id: 'agent-review',
+          label: 'Review',
+          action: 'agent-prompt',
+          agent: 'codex',
+          prompt: '  Review this diff\n',
+          command: "codex 'old workaround'"
+        },
+        {
+          id: 'unknown-agent',
+          label: 'Unknown',
+          action: 'agent-prompt',
+          agent: 'not-real',
+          prompt: 'Do work'
+        }
+      ])
+    ).toEqual([
+      {
+        id: 'agent-review',
+        label: 'Review',
+        action: 'agent-prompt',
+        agent: 'codex',
+        prompt: '  Review this diff',
         scope: { type: 'global' }
       }
     ])
@@ -167,6 +207,29 @@ describe('terminal quick commands', () => {
         appendEnter: false
       })
     ).toBe('git status')
+  })
+
+  it('classifies quick command actions and body text', () => {
+    const terminal = {
+      id: 'status',
+      label: 'Status',
+      command: 'git status',
+      appendEnter: true
+    }
+    const agent = {
+      id: 'agent',
+      label: 'Agent',
+      action: 'agent-prompt' as const,
+      agent: 'claude' as const,
+      prompt: 'Fix the tests'
+    }
+
+    expect(getTerminalQuickCommandAction(terminal)).toBe('terminal-command')
+    expect(getTerminalQuickCommandBody(terminal)).toBe('git status')
+    expect(isTerminalQuickCommandComplete(terminal)).toBe(true)
+    expect(getTerminalQuickCommandAction(agent)).toBe('agent-prompt')
+    expect(getTerminalQuickCommandBody(agent)).toBe('Fix the tests')
+    expect(isTerminalQuickCommandComplete(agent)).toBe(true)
   })
 })
 

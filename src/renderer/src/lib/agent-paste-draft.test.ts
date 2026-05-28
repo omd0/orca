@@ -11,6 +11,7 @@ const testState = vi.hoisted(() => ({
   subscribeToPtyData: vi.fn(),
   isRemoteRuntimePtyId: vi.fn(),
   sendRuntimePtyInput: vi.fn(),
+  sendRuntimePtyInputVerified: vi.fn(),
   subscribeToRuntimeTerminalData: vi.fn()
 }))
 
@@ -26,7 +27,8 @@ vi.mock('@/components/terminal-pane/pty-dispatcher', () => ({
 
 vi.mock('@/runtime/runtime-terminal-inspection', () => ({
   isRemoteRuntimePtyId: testState.isRemoteRuntimePtyId,
-  sendRuntimePtyInput: testState.sendRuntimePtyInput
+  sendRuntimePtyInput: testState.sendRuntimePtyInput,
+  sendRuntimePtyInputVerified: testState.sendRuntimePtyInputVerified
 }))
 
 vi.mock('@/runtime/runtime-terminal-stream', () => ({
@@ -59,6 +61,9 @@ describe('pasteDraftWhenAgentReady', () => {
     testState.isRemoteRuntimePtyId.mockReset()
     testState.isRemoteRuntimePtyId.mockReturnValue(false)
     testState.sendRuntimePtyInput.mockReset()
+    testState.sendRuntimePtyInput.mockReturnValue(true)
+    testState.sendRuntimePtyInputVerified.mockReset()
+    testState.sendRuntimePtyInputVerified.mockResolvedValue(true)
     testState.subscribeToRuntimeTerminalData.mockReset()
   })
 
@@ -140,7 +145,37 @@ describe('pasteDraftWhenAgentReady', () => {
     expect(testState.sendRuntimePtyInput).not.toHaveBeenCalled()
   })
 
-  it('can force paste and submit for native-prefill agents', async () => {
+  it('submits in a separate write after force-pasting native-prefill agents', async () => {
+    const promise = pasteDraftWhenAgentReady({
+      tabId: 'tab-1',
+      content: ISSUE_URL,
+      agent: 'claude',
+      submit: true,
+      forcePaste: true
+    })
+    await flushMicrotasks()
+
+    testState.ptyObserver?.(DECSET_BRACKETED_PASTE)
+    await vi.advanceTimersByTimeAsync(1500)
+    await flushMicrotasks()
+
+    expect(testState.sendRuntimePtyInputVerified).toHaveBeenCalledTimes(1)
+    expect(testState.sendRuntimePtyInputVerified).toHaveBeenCalledWith(
+      {},
+      'pty-1',
+      PASTED_ISSUE_URL
+    )
+    await vi.advanceTimersByTimeAsync(49)
+    expect(testState.sendRuntimePtyInputVerified).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    await expect(promise).resolves.toBe(true)
+    expect(testState.sendRuntimePtyInputVerified).toHaveBeenNthCalledWith(2, {}, 'pty-1', '\r')
+    expect(testState.sendRuntimePtyInput).not.toHaveBeenCalled()
+  })
+
+  it('does not submit when the verified paste write fails', async () => {
+    testState.sendRuntimePtyInputVerified.mockResolvedValueOnce(false)
+
     const promise = pasteDraftWhenAgentReady({
       tabId: 'tab-1',
       content: ISSUE_URL,
@@ -153,8 +188,8 @@ describe('pasteDraftWhenAgentReady', () => {
     testState.ptyObserver?.(DECSET_BRACKETED_PASTE)
     await vi.advanceTimersByTimeAsync(1500)
 
-    await expect(promise).resolves.toBe(true)
-    expect(testState.sendRuntimePtyInput).toHaveBeenCalledWith({}, 'pty-1', `${PASTED_ISSUE_URL}\r`)
+    await expect(promise).resolves.toBe(false)
+    expect(testState.sendRuntimePtyInputVerified).toHaveBeenCalledTimes(1)
   })
 })
 
