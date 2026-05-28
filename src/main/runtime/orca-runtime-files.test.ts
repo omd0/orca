@@ -1,3 +1,6 @@
+/* eslint-disable max-lines -- Why: runtime file command tests share one mocked
+ * filesystem/RPC setup across local and SSH path cases; splitting the suite
+ * would duplicate fragile watcher and authorization mocks. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as Fs from 'fs'
 import type * as FsPromises from 'fs/promises'
