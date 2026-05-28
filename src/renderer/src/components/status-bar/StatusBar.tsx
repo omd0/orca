@@ -27,7 +27,11 @@ import type {
   ClaudeRateLimitAccountsState,
   CodexRateLimitAccountsState
 } from '../../../../shared/types'
-import type { ProviderRateLimits, RateLimitWindow } from '../../../../shared/rate-limit-types'
+import type {
+  ProviderRateLimits,
+  RateLimitRuntimeTarget,
+  RateLimitWindow
+} from '../../../../shared/rate-limit-types'
 import { ProviderIcon, ProviderPanel, barColor } from './tooltip'
 import { ClaudeIcon, GeminiIcon, OpenAIIcon, OpenCodeGoIcon } from './icons'
 import { formatWindowLabel } from '@/lib/window-label-formatter'
@@ -65,6 +69,7 @@ type CodexStatusSwitchTarget = {
 type CodexStatusSwitchGroup = {
   key: string
   label: string
+  runtimeTarget: CodexStatusRuntimeTarget
   targets: CodexStatusSwitchTarget[]
 }
 
@@ -96,6 +101,19 @@ function getCodexStatusRuntimeLabel(target: CodexStatusRuntimeTarget): string {
     return getHostRuntimeLabel()
   }
   return target.wslDistro ? `WSL ${target.wslDistro}` : 'WSL default'
+}
+
+function getCodexStatusRuntimeKey(target: CodexStatusRuntimeTarget): string {
+  return target.runtime === 'host' ? 'host' : `wsl:${getCodexStatusWslKey(target.wslDistro)}`
+}
+
+function toCodexStatusRuntimeTarget(
+  target: RateLimitRuntimeTarget | undefined
+): CodexStatusRuntimeTarget {
+  if (target?.runtime === 'wsl') {
+    return { runtime: 'wsl', wslDistro: target.wslDistro }
+  }
+  return { runtime: 'host', wslDistro: null }
 }
 
 function getCodexStatusActiveId(
@@ -136,8 +154,9 @@ function buildCodexStatusSwitchGroups(
     const activeId = getCodexStatusActiveId(state, target)
     const accountsForTarget = getCodexStatusAccountsForTarget(state, target)
     return {
-      key: target.runtime === 'host' ? 'host' : `wsl:${getCodexStatusWslKey(target.wslDistro)}`,
+      key: getCodexStatusRuntimeKey(target),
       label: getCodexStatusRuntimeLabel(target),
+      runtimeTarget: target,
       targets: [
         {
           id: null,
@@ -227,6 +246,55 @@ function CodexRestartStatusPrompt(): React.JSX.Element | null {
         </button>
       </div>
     </>
+  )
+}
+
+function CodexRuntimeToggle({
+  groups,
+  value,
+  disabled,
+  onChange
+}: {
+  groups: CodexStatusSwitchGroup[]
+  value: string
+  disabled: boolean
+  onChange: (group: CodexStatusSwitchGroup) => void
+}): React.JSX.Element | null {
+  if (groups.length <= 1) {
+    return null
+  }
+
+  return (
+    <div className="px-2 pt-2">
+      <div
+        role="radiogroup"
+        aria-label="Codex usage runtime"
+        className="inline-flex w-full items-center rounded-md border border-border bg-background/50 p-0.5"
+      >
+        {groups.map((group) => {
+          const active = group.key === value
+          return (
+            <button
+              key={group.key}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              disabled={disabled}
+              onClick={() => onChange(group)}
+              className={`min-w-0 flex-1 rounded-sm px-2 py-1 text-center text-xs outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 ${
+                active
+                  ? 'bg-accent font-medium text-accent-foreground'
+                  : disabled
+                    ? 'cursor-not-allowed text-muted-foreground/50'
+                    : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <span className="block truncate">{group.label}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -605,12 +673,15 @@ function CodexSwitcherMenu({
     activeAccountId: null
   })
   const [isSwitching, setIsSwitching] = useState(false)
+  const [isChangingRuntime, setIsChangingRuntime] = useState(false)
   const openSettingsPage = useAppStore((s) => s.openSettingsPage)
   const openSettingsTarget = useAppStore((s) => s.openSettingsTarget)
   const fetchSettings = useAppStore((s) => s.fetchSettings)
   const recordFeatureInteraction = useAppStore((s) => s.recordFeatureInteraction)
+  const refreshCodexRateLimitsForTarget = useAppStore((s) => s.refreshCodexRateLimitsForTarget)
   const fetchInactiveCodexAccountUsage = useAppStore((s) => s.fetchInactiveCodexAccountUsage)
   const inactiveCodexAccounts = useAppStore((s) => s.rateLimits.inactiveCodexAccounts)
+  const codexTarget = useAppStore((s) => s.rateLimits.codexTarget)
   const codexAccountSyncKey = useAppStore((s) => {
     const settings = s.settings
     if (!settings) {
@@ -671,6 +742,20 @@ function CodexSwitcherMenu({
     }
   }
 
+  const handleSelectRuntime = async (group: CodexStatusSwitchGroup): Promise<void> => {
+    const currentKey = getCodexStatusRuntimeKey(toCodexStatusRuntimeTarget(codexTarget))
+    if (group.key === currentKey || isChangingRuntime) {
+      return
+    }
+    setIsChangingRuntime(true)
+    setAccountsExpanded(false)
+    try {
+      await refreshCodexRateLimitsForTarget(group.runtimeTarget)
+    } finally {
+      setIsChangingRuntime(false)
+    }
+  }
+
   useEffect(() => {
     if (!open) {
       setAccountsExpanded(false)
@@ -684,6 +769,10 @@ function CodexSwitcherMenu({
   }, [accountsExpanded, fetchInactiveCodexAccountUsage])
 
   const switchGroups = buildCodexStatusSwitchGroups(accounts)
+  const selectedRuntimeKey = getCodexStatusRuntimeKey(toCodexStatusRuntimeTarget(codexTarget))
+  const selectedGroup =
+    switchGroups.find((group) => group.key === selectedRuntimeKey) ?? switchGroups[0]
+  const activeTarget = selectedGroup?.targets.find((target) => target.active)
 
   return (
     <ProviderDetailsMenu
@@ -691,6 +780,14 @@ function CodexSwitcherMenu({
       compact={compact}
       iconOnly={iconOnly}
       ariaLabel="Open Codex details and account switcher"
+      topContent={
+        <CodexRuntimeToggle
+          groups={switchGroups}
+          value={selectedGroup?.key ?? selectedRuntimeKey}
+          disabled={isChangingRuntime}
+          onChange={(group) => void handleSelectRuntime(group)}
+        />
+      }
       open={open}
       onOpenChange={setOpen}
     >
@@ -702,17 +799,14 @@ function CodexSwitcherMenu({
         }}
       >
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-0.5 text-[12px]">
-          {switchGroups.map((group) => {
-            const active = group.targets.find((target) => target.active)
-            return (
-              <div key={group.key} className="flex min-w-0 items-center gap-1.5">
-                <span className="shrink-0 text-muted-foreground">{group.label}:</span>
-                <span className="min-w-0 flex-1 truncate text-foreground">
-                  {active?.label ?? 'System default'}
-                </span>
-              </div>
-            )
-          })}
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="shrink-0 text-muted-foreground">
+              {selectedGroup?.label ?? 'Codex'}:
+            </span>
+            <span className="min-w-0 flex-1 truncate text-foreground">
+              {activeTarget?.label ?? 'System default'}
+            </span>
+          </div>
         </div>
         {accountsExpanded ? (
           <ChevronDown className="ml-auto size-3.5 text-muted-foreground/85" />
@@ -722,26 +816,17 @@ function CodexSwitcherMenu({
       </DropdownMenuItem>
       {accountsExpanded ? (
         <div className="px-1 pb-1">
-          <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-            Switch by runtime
-          </div>
           <div className="max-h-[220px] overflow-y-auto rounded-md border border-border/60 bg-accent/5 p-1 scrollbar-sleek">
-            {switchGroups.map((group, groupIndex) => (
-              <div
-                key={group.key}
-                className={groupIndex === 0 ? '' : 'mt-1 border-t border-border/50 pt-1'}
-              >
-                <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                  {group.label}
-                </div>
-                {group.targets.map((target) => {
+            {selectedGroup ? (
+              <>
+                {selectedGroup.targets.map((target) => {
                   const inactiveUsage = target.id
                     ? inactiveCodexAccounts.find((a) => a.accountId === target.id)
                     : null
 
                   return (
                     <DropdownMenuItem
-                      key={`${group.key}:${target.id ?? 'system'}`}
+                      key={`${selectedGroup.key}:${target.id ?? 'system'}`}
                       onSelect={(event) => {
                         // Why: account switching may need an immediate follow-up
                         // restart action for live Codex tabs. Prevent the menu from
@@ -752,7 +837,7 @@ function CodexSwitcherMenu({
                           void handleSelectAccount(target.id, target.runtimeTarget)
                         }
                       }}
-                      disabled={isSwitching || target.active}
+                      disabled={isSwitching || isChangingRuntime || target.active}
                     >
                       <div className="flex w-full min-w-0 flex-col gap-0.5">
                         <div className="flex min-w-0 items-center gap-2">
@@ -775,8 +860,8 @@ function CodexSwitcherMenu({
                     </DropdownMenuItem>
                   )
                 })}
-              </div>
-            ))}
+              </>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -803,6 +888,7 @@ function ProviderDetailsMenu({
   compact,
   iconOnly,
   ariaLabel,
+  topContent,
   open,
   onOpenChange,
   children
@@ -811,6 +897,7 @@ function ProviderDetailsMenu({
   compact: boolean
   iconOnly: boolean
   ariaLabel: string
+  topContent?: React.ReactNode
   open?: boolean
   onOpenChange?: (open: boolean) => void
   children?: React.ReactNode
@@ -853,6 +940,7 @@ function ProviderDetailsMenu({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" sideOffset={8} className="w-[260px]">
+        {topContent}
         <div className="p-2">
           <ProviderPanel p={provider} />
         </div>

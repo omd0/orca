@@ -167,6 +167,7 @@ export class RateLimitService {
   getState(): RateLimitState {
     return {
       ...this.state,
+      codexTarget: this.codexFetchTarget,
       inactiveClaudeAccounts: this.buildInactiveArray(
         this.inactiveClaudeCache,
         this.inactiveClaudeFetching
@@ -208,6 +209,19 @@ export class RateLimitService {
     this.updateState({
       ...this.state,
       codex: this.withFetchingStatus(null, 'codex')
+    })
+    await this.fetchCodexOnly({ force: true })
+    return this.getState()
+  }
+
+  async refreshCodexForTarget(target?: CodexAccountSelectionTarget): Promise<RateLimitState> {
+    const nextTarget = normalizeCodexAccountSelectionTarget(target)
+    const targetChanged = !this.isSameCodexTarget(this.codexFetchTarget, nextTarget)
+    this.codexFetchTarget = nextTarget
+    this.codexFetchGeneration += 1
+    this.updateState({
+      ...this.state,
+      codex: this.withFetchingStatus(targetChanged ? null : this.state.codex, 'codex')
     })
     await this.fetchCodexOnly({ force: true })
     return this.getState()
