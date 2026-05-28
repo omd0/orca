@@ -255,7 +255,10 @@ describe('RateLimitService', () => {
 
     await service.fetchInactiveCodexAccountsOnOpen()
 
-    expect(fetchCodexRateLimits).toHaveBeenCalledWith({ codexHomePath: wslCodexHome })
+    expect(fetchCodexRateLimits).toHaveBeenCalledWith({
+      codexHomePath: wslCodexHome,
+      allowPtyFallback: false
+    })
     expect(service.getState().inactiveCodexAccounts).toEqual([
       {
         accountId: 'account-1',

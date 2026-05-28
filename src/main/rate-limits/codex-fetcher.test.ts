@@ -110,6 +110,23 @@ describe('fetchCodexRateLimits', () => {
     })
   })
 
+  it('does not start the PTY fallback when disabled for background account previews', async () => {
+    const rpcChild = makeRpcChild()
+    childSpawnMock.mockReturnValue(rpcChild)
+
+    const resultPromise = fetchCodexRateLimits({ allowPtyFallback: false })
+    rpcChild.emit('close')
+    await vi.advanceTimersByTimeAsync(0)
+
+    await expect(resultPromise).resolves.toMatchObject({
+      provider: 'codex',
+      session: null,
+      weekly: null,
+      status: 'error'
+    })
+    expect(ptySpawnMock).not.toHaveBeenCalled()
+  })
+
   it('normalizes Codex RPC remaining-minute windows to fixed display durations', async () => {
     const rpcChild = makeRpcChild()
     childSpawnMock.mockReturnValue(rpcChild)

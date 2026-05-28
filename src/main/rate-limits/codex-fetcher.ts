@@ -15,6 +15,7 @@ const MAX_DIAGNOSTIC_OUTPUT_LENGTH = 100_000
 
 export type FetchCodexRateLimitsOptions = {
   codexHomePath?: string | null
+  allowPtyFallback?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -483,9 +484,22 @@ export async function fetchCodexRateLimits(
     if (rpcResult.status === 'ok' || rpcResult.status === 'unavailable') {
       return rpcResult
     }
+    if (options?.allowPtyFallback === false) {
+      return rpcResult
+    }
     // Why: app-server can fail independently of the interactive CLI. Keep the
     // status-bar useful by trying the older /status PTY reader on RPC errors.
   } catch {
+    if (options?.allowPtyFallback === false) {
+      return {
+        provider: 'codex',
+        session: null,
+        weekly: null,
+        updatedAt: Date.now(),
+        error: 'RPC failed',
+        status: 'error'
+      }
+    }
     // RPC failed — fall through to PTY
   }
 

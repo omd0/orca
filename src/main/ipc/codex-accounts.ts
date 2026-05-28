@@ -15,7 +15,14 @@ export function registerCodexAccountHandlers(codexAccounts: CodexAccountService)
   )
   ipcMain.handle(
     'codexAccounts:select',
-    (_event, args: { accountId: string | null } & CodexAccountSelectionTarget) =>
-      codexAccounts.selectAccountForTarget(args.accountId, args)
+    (_event, args: { accountId: string | null } & CodexAccountSelectionTarget) => {
+      if (!args.runtime) {
+        // Why: older renderer surfaces selected by account id only. Let the
+        // service infer the account's runtime instead of treating missing
+        // runtime as Windows/host and rejecting valid WSL accounts.
+        return codexAccounts.selectAccount(args.accountId)
+      }
+      return codexAccounts.selectAccountForTarget(args.accountId, args)
+    }
   )
 }

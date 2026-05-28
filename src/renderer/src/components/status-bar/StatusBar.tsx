@@ -48,6 +48,26 @@ type StatusBarProps = {
   floatingTerminalOpen: boolean
 }
 
+type CodexStatusRuntimeTarget = {
+  runtime: 'host' | 'wsl'
+  wslDistro: string | null
+}
+
+type CodexStatusAccount = CodexRateLimitAccountsState['accounts'][number]
+
+type CodexStatusSwitchTarget = {
+  id: string | null
+  label: string
+  active: boolean
+  runtimeTarget: CodexStatusRuntimeTarget
+}
+
+type CodexStatusSwitchGroup = {
+  key: string
+  label: string
+  targets: CodexStatusSwitchTarget[]
+}
+
 function getCodexAccountLabel(
   state: CodexRateLimitAccountsState,
   accountId: string | null | undefined
@@ -58,13 +78,104 @@ function getCodexAccountLabel(
   return state.accounts.find((account) => account.id === accountId)?.email ?? 'Codex account'
 }
 
-function getCodexAccountRuntimeLabel(
-  account: CodexRateLimitAccountsState['accounts'][number]
-): string {
-  if (account.managedHomeRuntime === 'wsl') {
-    return account.wslDistro ? `WSL ${account.wslDistro}` : 'WSL'
+function getCodexAccountDisplayLabel(account: CodexStatusAccount): string {
+  return account.workspaceLabel ? `${account.email} (${account.workspaceLabel})` : account.email
+}
+
+function getCodexStatusWslKey(wslDistro: string | null | undefined): string {
+  const trimmed = wslDistro?.trim()
+  return trimmed ? trimmed : '__default__'
+}
+
+function getCodexStatusRuntimeLabel(target: CodexStatusRuntimeTarget): string {
+  if (target.runtime === 'host') {
+    return 'Windows'
   }
-  return 'Windows'
+  return target.wslDistro ? `WSL ${target.wslDistro}` : 'WSL default'
+}
+
+function getCodexStatusActiveId(
+  state: CodexRateLimitAccountsState,
+  target: CodexStatusRuntimeTarget
+): string | null {
+  const selection = state.activeAccountIdsByRuntime
+  if (target.runtime === 'host') {
+    return selection?.host ?? state.activeAccountId ?? null
+  }
+  return selection?.wsl?.[getCodexStatusWslKey(target.wslDistro)] ?? null
+}
+
+function getCodexStatusAccountsForTarget(
+  state: CodexRateLimitAccountsState,
+  target: CodexStatusRuntimeTarget
+): CodexStatusAccount[] {
+  if (target.runtime === 'host') {
+    return state.accounts.filter((account) => account.managedHomeRuntime !== 'wsl')
+  }
+  return state.accounts.filter(
+    (account) =>
+      account.managedHomeRuntime === 'wsl' &&
+      getCodexStatusWslKey(account.wslDistro) === getCodexStatusWslKey(target.wslDistro)
+  )
+}
+
+function buildCodexStatusSwitchGroups(
+  state: CodexRateLimitAccountsState
+): CodexStatusSwitchGroup[] {
+  const groups: CodexStatusSwitchGroup[] = []
+  const makeGroup = (target: CodexStatusRuntimeTarget): CodexStatusSwitchGroup => {
+    const activeId = getCodexStatusActiveId(state, target)
+    const accountsForTarget = getCodexStatusAccountsForTarget(state, target)
+    return {
+      key: target.runtime === 'host' ? 'host' : `wsl:${getCodexStatusWslKey(target.wslDistro)}`,
+      label: getCodexStatusRuntimeLabel(target),
+      targets: [
+        {
+          id: null,
+          label: 'System default',
+          active: activeId === null,
+          runtimeTarget: target
+        },
+        ...accountsForTarget.map((account) => ({
+          id: account.id,
+          label: getCodexAccountDisplayLabel(account),
+          active: account.id === activeId,
+          runtimeTarget: target
+        }))
+      ]
+    }
+  }
+
+  groups.push(makeGroup({ runtime: 'host', wslDistro: null }))
+
+  const wslKeys = new Set<string>(Object.keys(state.activeAccountIdsByRuntime?.wsl ?? {}))
+  for (const account of state.accounts) {
+    if (account.managedHomeRuntime === 'wsl') {
+      wslKeys.add(getCodexStatusWslKey(account.wslDistro))
+    }
+  }
+
+  for (const key of Array.from(wslKeys).sort((a, b) => {
+    if (a === '__default__') {
+      return -1
+    }
+    if (b === '__default__') {
+      return 1
+    }
+    return a.localeCompare(b)
+  })) {
+    groups.push(makeGroup({ runtime: 'wsl', wslDistro: key === '__default__' ? null : key }))
+  }
+
+  return groups
+}
+
+function getCodexStatusActiveSummary(groups: CodexStatusSwitchGroup[]): string {
+  const labels = groups.map((group) => {
+    const active = group.targets.find((target) => target.active)
+    return `${group.label}: ${active?.label ?? 'System default'}`
+  })
+  return labels.length > 0 ? labels.join(' / ') : 'System default'
 }
 
 function CodexRestartStatusPrompt(): React.JSX.Element | null {
@@ -522,21 +633,29 @@ function CodexSwitcherMenu({
     })
   }, [loadAccounts, open, codexAccountSyncKey])
 
-  const handleSelectAccount = async (accountId: string | null): Promise<void> => {
+  const handleSelectAccount = async (
+    accountId: string | null,
+    target: CodexStatusRuntimeTarget
+  ): Promise<void> => {
     if (isSwitching) {
       return
     }
-    const previousActiveAccountId = accounts.activeAccountId
+    const previousActiveAccountId = getCodexStatusActiveId(accounts, target)
     setIsSwitching(true)
     try {
-      const next = await window.api.codexAccounts.select({ accountId })
+      const next = await window.api.codexAccounts.select({
+        accountId,
+        runtime: target.runtime,
+        wslDistro: target.wslDistro
+      })
       recordFeatureInteraction('codex-account-switching')
       setAccounts(next)
       await fetchSettings()
-      if (previousActiveAccountId !== next.activeAccountId) {
+      const nextActiveAccountId = getCodexStatusActiveId(next, target)
+      if (previousActiveAccountId !== nextActiveAccountId) {
         await markLiveCodexSessionsForRestart({
           previousAccountLabel: getCodexAccountLabel(accounts, previousActiveAccountId),
-          nextAccountLabel: getCodexAccountLabel(next, next.activeAccountId)
+          nextAccountLabel: getCodexAccountLabel(next, nextActiveAccountId)
         })
         // Why: account switching can require a second explicit recovery step
         // for live Codex terminals. Keeping the switcher open and collapsing
@@ -563,31 +682,8 @@ function CodexSwitcherMenu({
     }
   }, [accountsExpanded, fetchInactiveCodexAccountUsage])
 
-  const activeAccountLabel =
-    accounts.activeAccountId === null
-      ? 'System default'
-      : (() => {
-          const account = accounts.accounts.find((entry) => entry.id === accounts.activeAccountId)
-          if (!account) {
-            return 'Managed'
-          }
-          return account.workspaceLabel
-            ? `${account.email} (${account.workspaceLabel}) · ${getCodexAccountRuntimeLabel(account)}`
-            : `${account.email} · ${getCodexAccountRuntimeLabel(account)}`
-        })()
-  const availableSwitchTargets = [
-    ...(accounts.activeAccountId === null
-      ? []
-      : [{ id: null as string | null, label: 'System default' }]),
-    ...accounts.accounts
-      .filter((account) => account.id !== accounts.activeAccountId)
-      .map((account) => ({
-        id: account.id,
-        label: account.workspaceLabel
-          ? `${account.email} (${account.workspaceLabel}) · ${getCodexAccountRuntimeLabel(account)}`
-          : `${account.email} · ${getCodexAccountRuntimeLabel(account)}`
-      }))
-  ]
+  const switchGroups = buildCodexStatusSwitchGroups(accounts)
+  const activeAccountLabel = getCodexStatusActiveSummary(switchGroups)
 
   return (
     <ProviderDetailsMenu
@@ -617,44 +713,60 @@ function CodexSwitcherMenu({
       {accountsExpanded ? (
         <div className="px-1 pb-1">
           <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-            Switch to
+            Switch by runtime
           </div>
           <div className="max-h-[220px] overflow-y-auto rounded-md border border-border/60 bg-accent/5 p-1 scrollbar-sleek">
-            {availableSwitchTargets.length === 0 ? (
-              <div className="px-2 py-1.5 text-[11px] text-muted-foreground">No other accounts</div>
-            ) : null}
-            {availableSwitchTargets.map((target) => {
-              const inactiveUsage = target.id
-                ? inactiveCodexAccounts.find((a) => a.accountId === target.id)
-                : null
+            {switchGroups.map((group, groupIndex) => (
+              <div
+                key={group.key}
+                className={groupIndex === 0 ? '' : 'mt-1 border-t border-border/50 pt-1'}
+              >
+                <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                  {group.label}
+                </div>
+                {group.targets.map((target) => {
+                  const inactiveUsage = target.id
+                    ? inactiveCodexAccounts.find((a) => a.accountId === target.id)
+                    : null
 
-              return (
-                <DropdownMenuItem
-                  key={target.id ?? 'system'}
-                  onSelect={(event) => {
-                    // Why: account switching may need an immediate follow-up
-                    // restart action for live Codex tabs. Prevent the menu from
-                    // auto-closing so that prompt can stay within the same
-                    // account-switcher interaction instead of jumping elsewhere.
-                    event.preventDefault()
-                    void handleSelectAccount(target.id)
-                  }}
-                  disabled={isSwitching}
-                >
-                  <div className="flex w-full flex-col gap-0.5">
-                    <span className="truncate">{target.label}</span>
-                    {inactiveUsage?.isFetching && !inactiveUsage.claude ? (
-                      <InlineUsageSkeleton />
-                    ) : inactiveUsage?.claude ? (
-                      <InlineUsageBars
-                        limits={inactiveUsage.claude}
-                        isFetching={inactiveUsage.isFetching}
-                      />
-                    ) : null}
-                  </div>
-                </DropdownMenuItem>
-              )
-            })}
+                  return (
+                    <DropdownMenuItem
+                      key={`${group.key}:${target.id ?? 'system'}`}
+                      onSelect={(event) => {
+                        // Why: account switching may need an immediate follow-up
+                        // restart action for live Codex tabs. Prevent the menu from
+                        // auto-closing so that prompt can stay within the same
+                        // account-switcher interaction instead of jumping elsewhere.
+                        event.preventDefault()
+                        if (!target.active) {
+                          void handleSelectAccount(target.id, target.runtimeTarget)
+                        }
+                      }}
+                      disabled={isSwitching || target.active}
+                    >
+                      <div className="flex w-full min-w-0 flex-col gap-0.5">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="min-w-0 flex-1 truncate">{target.label}</span>
+                          {target.active ? (
+                            <span className="shrink-0 text-[10px] font-medium text-muted-foreground">
+                              Active
+                            </span>
+                          ) : null}
+                        </div>
+                        {inactiveUsage?.isFetching && !inactiveUsage.claude ? (
+                          <InlineUsageSkeleton />
+                        ) : inactiveUsage?.claude ? (
+                          <InlineUsageBars
+                            limits={inactiveUsage.claude}
+                            isFetching={inactiveUsage.isFetching}
+                          />
+                        ) : null}
+                      </div>
+                    </DropdownMenuItem>
+                  )
+                })}
+              </div>
+            ))}
           </div>
         </div>
       ) : null}

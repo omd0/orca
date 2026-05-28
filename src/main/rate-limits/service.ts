@@ -288,7 +288,13 @@ export class RateLimitService {
         // Why: fetchCodexRateLimits already accepts codexHomePath, so we can
         // point it at the managed account's home directory directly without
         // materializing credentials into the shared runtime location.
-        const fresh = await fetchCodexRateLimits({ codexHomePath: account.managedHomePath })
+        // Why: opening the account switcher should never start hidden PTYs for
+        // every inactive account. On Windows that fallback can crash inside
+        // ConPTY; RPC-only is enough for this non-critical preview surface.
+        const fresh = await fetchCodexRateLimits({
+          codexHomePath: account.managedHomePath,
+          allowPtyFallback: false
+        })
         const cached = this.inactiveCodexCache.get(account.id) ?? null
         this.inactiveCodexCache.set(account.id, this.applyStalePolicy(fresh, cached))
       } catch {
