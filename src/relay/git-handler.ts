@@ -287,7 +287,10 @@ export class GitHandler {
       const chunk = filePaths.slice(i, i + BULK_CHUNK_SIZE)
       if (chunk.length > 0) {
         // Why: Git pathspec cleanup avoids raw recursive deletion through symlinked parents.
-        await this.git(['clean', '-ffdx', '--', ...chunk], worktreePath)
+        await this.git(
+          ['clean', '-ffdx', '--', ...chunk.map((p) => `:(literal)${p}`)],
+          worktreePath
+        )
       }
     }
   }

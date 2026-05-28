@@ -1156,7 +1156,10 @@ async function cleanUntrackedPaths(
     const chunk = filePaths.slice(i, i + BULK_CHUNK_SIZE)
     if (chunk.length > 0) {
       // Why: Git pathspec cleanup avoids raw recursive deletion through symlinked parents.
-      await gitExecFileAsync(['clean', '-ffdx', '--', ...chunk], { cwd: worktreePath })
+      await gitExecFileAsync(
+        ['clean', '-ffdx', '--', ...chunk.map((p) => `:(literal)${p}`)],
+        { cwd: worktreePath }
+      )
     }
   }
 }
