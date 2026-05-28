@@ -106,7 +106,12 @@ function getCodexStatusActiveId(
   if (target.runtime === 'host') {
     return selection?.host ?? state.activeAccountId ?? null
   }
-  return selection?.wsl?.[getCodexStatusWslKey(target.wslDistro)] ?? null
+  const distroSelection = selection?.wsl?.[getCodexStatusWslKey(target.wslDistro)]
+  if (target.wslDistro || distroSelection) {
+    return distroSelection ?? null
+  }
+  const selectedIds = Array.from(new Set(Object.values(selection?.wsl ?? {}).filter(Boolean)))
+  return selectedIds.length === 1 ? selectedIds[0] : null
 }
 
 function getCodexStatusAccountsForTarget(
