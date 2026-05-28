@@ -1,3 +1,6 @@
+/* eslint-disable max-lines -- Why: this class owns the daemon socket protocol,
+   request routing, stream fanout, and session lifecycle in one place so
+   renderer/daemon request semantics stay auditable across platform branches. */
 import { createServer, type Server, type Socket } from 'net'
 import { randomUUID } from 'crypto'
 import { performance } from 'perf_hooks'
