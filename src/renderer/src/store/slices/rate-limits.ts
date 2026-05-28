@@ -12,7 +12,7 @@ export type RateLimitSlice = {
   setRateLimitsFromPush: (state: RateLimitState) => void
 }
 
-export const createRateLimitSlice: StateCreator<AppState, [], [], RateLimitSlice> = (set) => ({
+export const createRateLimitSlice: StateCreator<AppState, [], [], RateLimitSlice> = (set, get) => ({
   rateLimits: {
     claude: null,
     codex: null,
@@ -42,6 +42,27 @@ export const createRateLimitSlice: StateCreator<AppState, [], [], RateLimitSlice
   },
 
   refreshCodexRateLimitsForTarget: async (target) => {
+    const current = get().rateLimits
+    const targetChanged =
+      current.codexTarget.runtime !== target.runtime ||
+      current.codexTarget.wslDistro !== target.wslDistro
+    set({
+      rateLimits: {
+        ...current,
+        codexTarget: target,
+        codex:
+          current.codex && !targetChanged
+            ? { ...current.codex, status: 'fetching' }
+            : {
+                provider: 'codex',
+                session: null,
+                weekly: null,
+                updatedAt: 0,
+                error: null,
+                status: 'fetching'
+              }
+      }
+    })
     try {
       const state = await window.api.rateLimits.refreshCodexForTarget(target)
       set({ rateLimits: state })

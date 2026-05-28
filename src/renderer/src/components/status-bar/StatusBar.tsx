@@ -252,12 +252,10 @@ function CodexRestartStatusPrompt(): React.JSX.Element | null {
 function CodexRuntimeToggle({
   groups,
   value,
-  disabled,
   onChange
 }: {
   groups: CodexStatusSwitchGroup[]
   value: string
-  disabled: boolean
   onChange: (group: CodexStatusSwitchGroup) => void
 }): React.JSX.Element | null {
   if (groups.length <= 1) {
@@ -279,14 +277,11 @@ function CodexRuntimeToggle({
               type="button"
               role="radio"
               aria-checked={active}
-              disabled={disabled}
               onClick={() => onChange(group)}
               className={`min-w-0 flex-1 rounded-sm px-2 py-1 text-center text-xs outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 ${
                 active
                   ? 'bg-accent font-medium text-accent-foreground'
-                  : disabled
-                    ? 'cursor-not-allowed text-muted-foreground/50'
-                    : 'text-muted-foreground hover:text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               <span className="block truncate">{group.label}</span>
@@ -673,7 +668,6 @@ function CodexSwitcherMenu({
     activeAccountId: null
   })
   const [isSwitching, setIsSwitching] = useState(false)
-  const [isChangingRuntime, setIsChangingRuntime] = useState(false)
   const openSettingsPage = useAppStore((s) => s.openSettingsPage)
   const openSettingsTarget = useAppStore((s) => s.openSettingsTarget)
   const fetchSettings = useAppStore((s) => s.fetchSettings)
@@ -744,15 +738,14 @@ function CodexSwitcherMenu({
 
   const handleSelectRuntime = async (group: CodexStatusSwitchGroup): Promise<void> => {
     const currentKey = getCodexStatusRuntimeKey(toCodexStatusRuntimeTarget(codexTarget))
-    if (group.key === currentKey || isChangingRuntime) {
+    if (group.key === currentKey) {
       return
     }
-    setIsChangingRuntime(true)
     setAccountsExpanded(false)
     try {
       await refreshCodexRateLimitsForTarget(group.runtimeTarget)
-    } finally {
-      setIsChangingRuntime(false)
+    } catch (error) {
+      console.error('Failed to switch Codex usage runtime:', error)
     }
   }
 
@@ -784,7 +777,6 @@ function CodexSwitcherMenu({
         <CodexRuntimeToggle
           groups={switchGroups}
           value={selectedGroup?.key ?? selectedRuntimeKey}
-          disabled={isChangingRuntime}
           onChange={(group) => void handleSelectRuntime(group)}
         />
       }
@@ -800,9 +792,6 @@ function CodexSwitcherMenu({
       >
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-0.5 text-[12px]">
           <div className="flex min-w-0 items-center gap-1.5">
-            <span className="shrink-0 text-muted-foreground">
-              {selectedGroup?.label ?? 'Codex'}:
-            </span>
             <span className="min-w-0 flex-1 truncate text-foreground">
               {activeTarget?.label ?? 'System default'}
             </span>
@@ -837,7 +826,7 @@ function CodexSwitcherMenu({
                           void handleSelectAccount(target.id, target.runtimeTarget)
                         }
                       }}
-                      disabled={isSwitching || isChangingRuntime || target.active}
+                      disabled={isSwitching || target.active}
                     >
                       <div className="flex w-full min-w-0 flex-col gap-0.5">
                         <div className="flex min-w-0 items-center gap-2">
