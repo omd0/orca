@@ -24,16 +24,19 @@ function getHostRuntimeLabel(): string {
 function getSelectedAgentRuntime(
   settings: GlobalSettings,
   wslAvailable: boolean,
-  wslDistros: string[]
+  wslDistros: string[],
+  wslCapabilitiesLoading: boolean
 ): AgentDetectionRuntime {
   const configuredRuntime =
     settings.localAgentRuntime ??
     (settings.terminalWindowsShell === 'wsl.exe' && wslAvailable ? 'wsl' : 'host')
-  if (configuredRuntime === 'wsl' && wslAvailable) {
+  if (configuredRuntime === 'wsl' && (wslAvailable || wslCapabilitiesLoading)) {
     const configuredDistro =
       settings.localAgentWslDistro?.trim() || settings.terminalWindowsWslDistro?.trim() || null
     const selectedDistro =
-      configuredDistro && wslDistros.includes(configuredDistro) ? configuredDistro : null
+      configuredDistro && (wslCapabilitiesLoading || wslDistros.includes(configuredDistro))
+        ? configuredDistro
+        : null
     return {
       runtime: 'wsl',
       wslDistro: selectedDistro,
@@ -51,7 +54,12 @@ export function AgentLocationSetting({
   wslDistros = [],
   wslCapabilitiesLoading = false
 }: AgentLocationSettingProps): React.JSX.Element {
-  const agentRuntime = getSelectedAgentRuntime(settings, wslAvailable, wslDistros)
+  const agentRuntime = getSelectedAgentRuntime(
+    settings,
+    wslAvailable,
+    wslDistros,
+    wslCapabilitiesLoading
+  )
   const updateAgentLocation = (updates: Partial<GlobalSettings>): void => {
     void Promise.resolve(updateSettings(updates)).then(() => refresh())
   }

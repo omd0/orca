@@ -74,6 +74,10 @@ function getActiveCodexAccountIdForRuntime(
   if (runtime.wslDistro) {
     return state.activeAccountIdsByRuntime?.wsl?.[runtime.wslDistro] ?? null
   }
+  const defaultSelection = state.activeAccountIdsByRuntime?.wsl?.__default__
+  if (defaultSelection) {
+    return defaultSelection
+  }
   const selectedIds = Array.from(
     new Set(Object.values(state.activeAccountIdsByRuntime?.wsl ?? {}).filter(Boolean))
   )
@@ -181,12 +185,15 @@ function accountMatchesRuntime(
 function getSelectedAccountRuntime(
   settings: GlobalSettings,
   wslAvailable: boolean,
-  wslDistros: string[]
+  wslDistros: string[],
+  wslCapabilitiesLoading: boolean
 ): LocalAccountRuntime {
-  if (wslAvailable && settings.localAccountRuntime === 'wsl') {
+  if ((wslAvailable || wslCapabilitiesLoading) && settings.localAccountRuntime === 'wsl') {
     const configuredDistro = settings.localAccountWslDistro?.trim() || null
     const selectedDistro =
-      configuredDistro && wslDistros.includes(configuredDistro) ? configuredDistro : null
+      configuredDistro && (wslCapabilitiesLoading || wslDistros.includes(configuredDistro))
+        ? configuredDistro
+        : null
     return {
       runtime: 'wsl',
       wslDistro: selectedDistro,
@@ -207,7 +214,12 @@ export function AccountsPane({
   const recordFeatureInteraction = useAppStore((s) => s.recordFeatureInteraction)
   const fetchSettings = useAppStore((s) => s.fetchSettings)
   const recordedOpenCodeSettingEditsRef = useRef<Set<'cookie' | 'workspaceId'>>(new Set())
-  const accountRuntime = getSelectedAccountRuntime(settings, wslAvailable, wslDistros)
+  const accountRuntime = getSelectedAccountRuntime(
+    settings,
+    wslAvailable,
+    wslDistros,
+    wslCapabilitiesLoading
+  )
 
   const [codexAccounts, setCodexAccounts] = useState<CodexRateLimitAccountsState>({
     accounts: [],
