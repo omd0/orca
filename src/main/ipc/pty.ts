@@ -57,6 +57,7 @@ import {
 import { parseWslPath } from '../wsl'
 import { mergePersistedWindowsPath } from '../pty/windows-environment-path'
 import type { CodexAccountSelectionTarget } from '../codex-accounts/runtime-selection'
+import { isHostCodexHomeForWsl, isWslCodexHomeForHost } from '../pty/codex-home-wsl-env'
 
 // ─── Provider Registry ──────────────────────────────────────────────
 // Routes PTY operations by connectionId. null = local provider.
@@ -296,9 +297,25 @@ function getCodexSelectionTargetForPty(
 ): CodexAccountSelectionTarget {
   const wslPath = typeof cwd === 'string' ? parseWslPath(cwd) : null
   if (isWslShellName(shellPath) || wslPath) {
-    return { runtime: 'wsl', wslDistro: wslDistro ?? wslPath?.distro ?? null }
+    return { runtime: 'wsl', wslDistro: wslPath?.distro ?? wslDistro ?? null }
   }
   return { runtime: 'host' }
+}
+
+function getCompatibleSelectedCodexHomePath(
+  target: CodexAccountSelectionTarget,
+  selectedCodexHomePath: string | null
+): string | null {
+  if (!selectedCodexHomePath) {
+    return null
+  }
+  const wslInfo = parseWslPath(selectedCodexHomePath)
+  if (target.runtime === 'wsl') {
+    return wslInfo || !isHostCodexHomeForWsl(selectedCodexHomePath) ? selectedCodexHomePath : null
+  }
+  return wslInfo || (process.platform === 'win32' && isWslCodexHomeForHost(selectedCodexHomePath))
+    ? null
+    : selectedCodexHomePath
 }
 
 function readEnvWithProcessFallback(
@@ -850,7 +867,10 @@ export function registerPtyHandlers(
           ctx?.isWsl === true
             ? { runtime: 'wsl', wslDistro: ctx.wslDistro ?? null }
             : { runtime: 'host' }
-        const selectedCodexHomePath = getSelectedCodexHomePath?.(codexSelectionTarget) ?? null
+        const selectedCodexHomePath = getCompatibleSelectedCodexHomePath(
+          codexSelectionTarget,
+          getSelectedCodexHomePath?.(codexSelectionTarget) ?? null
+        )
         const env = buildPtyHostEnv(id, baseEnv, {
           isPackaged: app.isPackaged,
           userDataPath: app.getPath('userData'),
@@ -1222,7 +1242,10 @@ export function registerPtyHandlers(
         getSettings?.()?.terminalWindowsWslDistro ?? null
       )
       const selectedCodexHomePath = isDaemonHostSpawn
-        ? (getSelectedCodexHomePath?.(codexSelectionTarget) ?? null)
+        ? getCompatibleSelectedCodexHomePath(
+            codexSelectionTarget,
+            getSelectedCodexHomePath?.(codexSelectionTarget) ?? null
+          )
         : null
       const skipCodexHomeEnv =
         isDaemonHostSpawn &&
@@ -1636,7 +1659,10 @@ export function registerPtyHandlers(
         getSettings?.()?.terminalWindowsWslDistro ?? null
       )
       const selectedCodexHomePath = isDaemonHostSpawn
-        ? (getSelectedCodexHomePath?.(codexSelectionTarget) ?? null)
+        ? getCompatibleSelectedCodexHomePath(
+            codexSelectionTarget,
+            getSelectedCodexHomePath?.(codexSelectionTarget) ?? null
+          )
         : null
       const skipCodexHomeEnv =
         isDaemonHostSpawn &&

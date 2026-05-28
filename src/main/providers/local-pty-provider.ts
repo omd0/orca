@@ -93,10 +93,10 @@ function disposePtyListeners(id: string): void {
 
 function getWslContextFromWorktreeId(
   worktreeId: string | undefined
-): { distro: string } | undefined {
+): { distro: string; treatPosixCwdAsWsl: true } | undefined {
   const worktreePath = worktreeId ? splitWorktreeId(worktreeId)?.worktreePath : undefined
   const wslInfo = worktreePath ? parseWslPath(worktreePath) : null
-  return wslInfo ? { distro: wslInfo.distro } : undefined
+  return wslInfo ? { distro: wslInfo.distro, treatPosixCwdAsWsl: true } : undefined
 }
 
 function getWslContextFromPreferredDistro(

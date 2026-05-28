@@ -27,6 +27,7 @@ export type WindowsShellLaunchArgs = {
 
 export type WindowsShellWslContext = {
   distro: string
+  treatPosixCwdAsWsl?: boolean
 }
 
 function buildWslShellArgs(linuxCwd: string, distro?: string): string[] {
@@ -84,7 +85,7 @@ export function resolveWindowsShellLaunchArgs(
         validationCwd: cwd
       }
     }
-    if (wslContext && cwd.startsWith('/')) {
+    if (wslContext?.treatPosixCwdAsWsl && cwd.startsWith('/')) {
       return {
         shellArgs: buildWslShellArgs(cwd, wslContext.distro),
         effectiveCwd: defaultCwd,
