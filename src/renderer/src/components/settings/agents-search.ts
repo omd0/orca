@@ -54,7 +54,7 @@ export const AGENTS_PANE_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   },
   {
     title: 'Agent Location',
-    description: 'Choose whether installed agents are detected in Windows or WSL.',
+    description: 'Choose whether installed agents are detected on this device or in WSL.',
     keywords: ['agent', 'location', 'windows', 'wsl', 'linux', 'detect', 'installed', 'path']
   },
   {

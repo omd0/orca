@@ -3,7 +3,8 @@ import type { SettingsSearchEntry } from './settings-search'
 export const ACCOUNTS_LOCATION_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   {
     title: 'Account Location',
-    description: 'Choose whether provider accounts are inspected and added in Windows or WSL.',
+    description:
+      'Choose whether provider accounts are inspected and added on this device or in WSL.',
     keywords: ['account', 'location', 'windows', 'wsl', 'linux', 'provider', 'auth']
   }
 ]

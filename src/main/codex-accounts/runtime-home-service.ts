@@ -299,6 +299,7 @@ export class CodexRuntimeHomeService {
       updateLastWrittenAuthJson: boolean
       lastWrittenAuthJson?: string | null
       setLastWrittenAuthJson?: (contents: string) => void
+      expectedAccountId?: string
     }
   ): CodexReadBackResult {
     try {
@@ -315,7 +316,10 @@ export class CodexRuntimeHomeService {
         return 'unchanged'
       }
 
-      const match = this.findManagedAccountForRuntimeAuth(runtimeContents)
+      const match = this.findManagedAccountForRuntimeAuth(
+        runtimeContents,
+        options.expectedAccountId
+      )
       if (match.kind !== 'matched') {
         if (match.kind === 'ambiguous') {
           console.warn('[codex-runtime-home] Refusing ambiguous Codex auth read-back')
@@ -350,10 +354,13 @@ export class CodexRuntimeHomeService {
   }
 
   private readBackRefreshedTokensForAccount(
-    _account: CodexManagedAccount,
+    account: CodexManagedAccount,
     options: { updateLastWrittenAuthJson: boolean }
   ): CodexReadBackResult {
-    return this.readBackRefreshedTokens(options)
+    return this.readBackRefreshedTokensFromPath(this.getRuntimeAuthPath(), {
+      ...options,
+      expectedAccountId: account.id
+    })
   }
 
   private safeSyncForCurrentSelection(): void {
@@ -413,13 +420,20 @@ export class CodexRuntimeHomeService {
       if (this.skipNextReadBackForAccountId === previousWslAccountId) {
         this.skipNextReadBackForAccountId = null
       } else {
-        this.readBackRefreshedTokensFromPath(runtimeAuthPath, {
-          updateLastWrittenAuthJson: true,
-          lastWrittenAuthJson: this.lastWrittenWslAuthJsonByDistro.get(distro) ?? null,
-          setLastWrittenAuthJson: (contents) => {
-            this.lastWrittenWslAuthJsonByDistro.set(distro, contents)
-          }
-        })
+        const previousWslAccount = this.getActiveAccount(
+          settings.codexManagedAccounts,
+          previousWslAccountId
+        )
+        if (previousWslAccount) {
+          this.readBackRefreshedTokensFromPath(runtimeAuthPath, {
+            updateLastWrittenAuthJson: true,
+            lastWrittenAuthJson: this.lastWrittenWslAuthJsonByDistro.get(distro) ?? null,
+            setLastWrittenAuthJson: (contents) => {
+              this.lastWrittenWslAuthJsonByDistro.set(distro, contents)
+            },
+            expectedAccountId: previousWslAccount.id
+          })
+        }
       }
     }
 
@@ -508,13 +522,19 @@ export class CodexRuntimeHomeService {
     }
   }
 
-  private findManagedAccountForRuntimeAuth(runtimeAuthContents: string): CodexReadBackMatch {
+  private findManagedAccountForRuntimeAuth(
+    runtimeAuthContents: string,
+    expectedAccountId?: string
+  ): CodexReadBackMatch {
     const matches: {
       account: CodexManagedAccount
       managedAuthPath: string
       managedAuthContents: string
     }[] = []
     for (const account of this.store.getSettings().codexManagedAccounts) {
+      if (expectedAccountId && account.id !== expectedAccountId) {
+        continue
+      }
       const managedAuthPath = join(account.managedHomePath, 'auth.json')
       if (!existsSync(managedAuthPath)) {
         continue
