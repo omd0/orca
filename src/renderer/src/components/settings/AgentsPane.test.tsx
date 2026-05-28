@@ -81,9 +81,10 @@ describe('AgentsPane', () => {
 
   it('renders the keep-awake toggle from settings', () => {
     const markup = renderPane(getDefaultSettings('/tmp'))
+    const hostRuntimeLabel = navigator.userAgent.includes('Windows') ? 'Windows' : 'This device'
 
     expect(markup).toContain('Agent location')
-    expect(markup).toContain('Show installed agents from Windows')
+    expect(markup).toContain(`Show installed agents from ${hostRuntimeLabel}`)
     expect(markup).toContain('Keep computer awake while agents are working')
     expect(markup).toContain(
       'Keeps this computer and display awake while agents are working. Orca also asks this device to stay awake when the lid is closed, subject to its power policy.'
