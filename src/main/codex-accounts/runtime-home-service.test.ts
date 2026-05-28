@@ -1130,6 +1130,56 @@ describe('CodexRuntimeHomeService', () => {
     }
   })
 
+  it('preserves WSL system-default token refreshes after app restart', async () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    const wslHome = join(testState.userDataDir, 'wsl-home')
+    vi.doMock('../wsl', () => ({
+      getDefaultWslDistro: () => 'Ubuntu',
+      getWslHome: () => wslHome
+    }))
+    const systemAuth = createCodexAuthJson('wsl@example.com', 'acct-wsl', 'system-old', 1_000)
+    const refreshedAuth = createCodexAuthJson(
+      'wsl@example.com',
+      'acct-wsl',
+      'runtime-refreshed',
+      2_000
+    )
+    const systemCodexHomePath = join(wslHome, '.codex')
+    const wslRuntimeHomePath = join(
+      wslHome,
+      '.local',
+      'share',
+      'orca',
+      'codex-runtime-home',
+      'home'
+    )
+    mkdirSync(systemCodexHomePath, { recursive: true })
+    mkdirSync(wslRuntimeHomePath, { recursive: true })
+    writeFileSync(join(systemCodexHomePath, 'auth.json'), systemAuth, 'utf-8')
+    writeFileSync(join(wslRuntimeHomePath, 'auth.json'), refreshedAuth, 'utf-8')
+    const store = createStore(
+      createSettings({
+        activeCodexManagedAccountId: null,
+        activeCodexManagedAccountIdsByRuntime: { host: null, wsl: { Ubuntu: null } }
+      })
+    )
+
+    try {
+      const { CodexRuntimeHomeService } = await import('./runtime-home-service')
+      const service = new CodexRuntimeHomeService(store as never)
+      const target = { runtime: 'wsl' as const, wslDistro: 'Ubuntu' }
+
+      expect(service.prepareForCodexLaunch(target)).toBe(wslRuntimeHomePath)
+      expect(readFileSync(join(systemCodexHomePath, 'auth.json'), 'utf-8')).toBe(refreshedAuth)
+      expect(readFileSync(join(wslRuntimeHomePath, 'auth.json'), 'utf-8')).toBe(refreshedAuth)
+    } finally {
+      if (originalPlatform) {
+        Object.defineProperty(process, 'platform', originalPlatform)
+      }
+    }
+  })
+
   it('does not overwrite auth.json when no managed account was ever active', async () => {
     const runtimeAuthPath = getRuntimeCodexAuthPath()
     writeFileSync(runtimeAuthPath, '{"account":"original"}\n', 'utf-8')

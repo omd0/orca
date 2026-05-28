@@ -441,11 +441,15 @@ export class CodexRuntimeHomeService {
         : null
       if (
         runtimeAuth !== null &&
-        mirroredSystemDefaultAuth !== null &&
         runtimeAuth !== systemAuth &&
-        systemAuth === mirroredSystemDefaultAuth &&
-        this.runtimeAuthMatchesSystemDefaultIdentity(runtimeAuth, mirroredSystemDefaultAuth)
+        this.runtimeAuthMatchesSystemDefaultIdentity(runtimeAuth, systemAuth) &&
+        ((mirroredSystemDefaultAuth !== null && systemAuth === mirroredSystemDefaultAuth) ||
+          (mirroredSystemDefaultAuth === null &&
+            this.runtimeAuthIsFresher(runtimeAuth, systemAuth)))
       ) {
+        // Why: WSL runtime homes are per-distro and their in-memory baseline is
+        // lost on app restart. A same-identity fresher runtime auth is a Codex
+        // token refresh and should be copied back before we mirror ~/.codex.
         this.writeRuntimeAuthAtPath(systemAuthPath, runtimeAuth)
         this.lastWrittenWslAuthJsonByDistro.set(distro, runtimeAuth)
         this.lastSyncedWslAccountIdByDistro.set(distro, null)
