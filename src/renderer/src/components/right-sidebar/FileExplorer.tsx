@@ -157,12 +157,17 @@ function FileExplorerInner(): React.JSX.Element {
     scrollRef
   })
 
+  const lastResetWorktreePathRef = useRef<string | null>(null)
   useEffect(() => {
     if (!visibleWorktreePath) {
       return
     }
     // Why: the sidebar remains mounted while closed to preserve caches, but
     // loading the hidden tree would probe every clicked workspace on macOS.
+    if (lastResetWorktreePathRef.current === visibleWorktreePath) {
+      return
+    }
+    lastResetWorktreePathRef.current = visibleWorktreePath
     resetSelection()
     resetAndLoad()
     clearFileExplorerUndoHistory()
