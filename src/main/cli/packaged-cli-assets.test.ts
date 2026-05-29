@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { copyFile, chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { copyFile, chmod, mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -24,6 +24,11 @@ describe('packaged CLI assets', () => {
         'node_modules/yaml/**'
       ])
     )
+  })
+
+  itRunsUnixShell('keeps the Linux launcher executable in packaged resources', async () => {
+    const launcherStats = await stat(linuxLauncherAsset)
+    expect(launcherStats.mode & 0o111).not.toBe(0)
   })
 
   itRunsUnixShell(

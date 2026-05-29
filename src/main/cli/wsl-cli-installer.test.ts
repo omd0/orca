@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 function makeHostStatus(launcherPath = 'C:\\Users\\me\\AppData\\Local\\Orca\\bin\\orca.cmd') {
   return {
     platform: 'win32',
-    commandName: 'orca-ide',
+    commandName: 'orca',
     commandPath: 'C:\\Users\\me\\AppData\\Local\\Programs\\Orca\\bin\\orca.cmd',
     pathDirectory: 'C:\\Users\\me\\AppData\\Local\\Programs\\Orca\\bin',
     pathConfigured: true,
@@ -108,6 +108,18 @@ describe('WslCliInstaller', () => {
       )
     )
     expect(wsl.getBridge()).toBe(_internals.buildWslBridgeScript())
+    const installCommand = wsl.calls.find((command) => command.includes('cat > "$command_tmp"'))
+    expect(installCommand).toContain("legacy_command_path='/home/alice/.local/bin/orca'")
+    expect(installCommand).toContain('rm -f "$legacy_command_path"')
+  })
+
+  it('derives the shared WSL bridge path for current and legacy command names', () => {
+    expect(_internals.getBridgePathFromCommandPath('/home/alice/.local/bin/orca-ide')).toBe(
+      '/home/alice/.local/share/orca/orca-wsl-bridge.ps1'
+    )
+    expect(_internals.getBridgePathFromCommandPath('/home/alice/.local/bin/orca')).toBe(
+      '/home/alice/.local/share/orca/orca-wsl-bridge.ps1'
+    )
   })
 
   it('reports installed WSL launchers whose bin directory is missing from PATH', async () => {
