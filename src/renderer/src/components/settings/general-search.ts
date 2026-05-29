@@ -88,7 +88,7 @@ export const GENERAL_CLI_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   },
   {
     title: 'Agent skill',
-    description: 'Install the Orca skill so agents know to use the orca CLI.',
+    description: 'Install the Orca skill so agents know to use the Orca CLI.',
     keywords: ['skill', 'agents', 'npx']
   }
 ]

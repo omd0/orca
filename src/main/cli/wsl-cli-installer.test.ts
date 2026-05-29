@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 function makeHostStatus(launcherPath = 'C:\\Users\\me\\AppData\\Local\\Orca\\bin\\orca.cmd') {
   return {
     platform: 'win32',
-    commandName: 'orca',
+    commandName: 'orca-ide',
     commandPath: 'C:\\Users\\me\\AppData\\Local\\Programs\\Orca\\bin\\orca.cmd',
     pathDirectory: 'C:\\Users\\me\\AppData\\Local\\Programs\\Orca\\bin',
     pathConfigured: true,
@@ -20,7 +20,7 @@ function makeHostStatus(launcherPath = 'C:\\Users\\me\\AppData\\Local\\Orca\\bin
 }
 
 function createWslRunner(initialFile: string | null = null, pathIncludesLocalBin = true) {
-  const commandPath = '/home/alice/.local/bin/orca'
+  const commandPath = '/home/alice/.local/bin/orca-ide'
   const bridgePath = '/home/alice/.local/share/orca/orca-wsl-bridge.ps1'
   const files = new Map<string, string>()
   if (initialFile !== null) {
@@ -91,7 +91,7 @@ describe('WslCliInstaller', () => {
 
     await expect(installer.getStatus()).resolves.toMatchObject({
       state: 'not_installed',
-      commandPath: '/home/alice/.local/bin/orca'
+      commandPath: '/home/alice/.local/bin/orca-ide'
     })
 
     const installed = await installer.install()

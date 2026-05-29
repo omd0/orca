@@ -240,7 +240,8 @@ export class WslCliInstaller {
     }
 
     const pathDirectory = `${home}/.local/bin`
-    const commandPath = `${pathDirectory}/orca`
+    // Why: matches the Linux CLI rename to `orca-ide` (avoids GNOME Orca conflict).
+    const commandPath = `${pathDirectory}/orca-ide`
     const pathConfigured =
       (
         await this.run(
@@ -296,9 +297,9 @@ export class WslCliInstaller {
   }): CliInstallStatus {
     return {
       platform: 'linux',
-      commandName: 'orca',
+      commandName: 'orca-ide',
       commandPath: args.commandPath,
-      pathDirectory: args.commandPath.replace(/\/orca$/, ''),
+      pathDirectory: args.commandPath.replace(/\/orca-ide$/, ''),
       pathConfigured: args.pathConfigured,
       launcherPath: args.launcherPath,
       installMethod: 'wrapper',
@@ -308,7 +309,7 @@ export class WslCliInstaller {
       unsupportedReason: null,
       detail:
         args.state === 'installed' && !args.pathConfigured
-          ? `${args.commandPath} is registered, but ${args.commandPath.replace(/\/orca$/, '')} is not on PATH in ${args.distro}.`
+          ? `${args.commandPath} is registered, but ${args.commandPath.replace(/\/orca-ide$/, '')} is not on PATH in ${args.distro}.`
           : args.detail
     }
   }
@@ -319,7 +320,7 @@ export class WslCliInstaller {
   ): CliInstallStatus {
     return {
       platform: 'linux',
-      commandName: 'orca',
+      commandName: 'orca-ide',
       commandPath: null,
       pathDirectory: null,
       pathConfigured: false,
