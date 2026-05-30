@@ -29,6 +29,10 @@ type CliInstallerOptions = {
   privilegedRunner?: (command: string) => Promise<void>
   userPathReader?: () => Promise<string | null>
   userPathWriter?: (value: string) => Promise<void>
+  // Why: AppImage runs from a FUSE mount at /tmp/.mount_*, so resourcesPath
+  // is ephemeral. The CLI must use a wrapper script that references the
+  // stable .AppImage file on disk instead of symlinking into the mount.
+  appImagePath?: string | null
 }
 
 type InstallSpec = {
@@ -50,6 +54,7 @@ export class CliInstaller {
   private readonly privilegedRunner: (command: string) => Promise<void>
   private readonly userPathReader: () => Promise<string | null>
   private readonly userPathWriter: (value: string) => Promise<void>
+  private readonly appImagePath: string | null
 
   // Why: Linux uses `orca-ide` to avoid shadowing GNOME Orca's /usr/bin/orca.
   private get commandName(): string {
@@ -74,6 +79,7 @@ export class CliInstaller {
     this.privilegedRunner = options.privilegedRunner ?? runMacPrivilegedCommand
     this.userPathReader = options.userPathReader ?? (() => readWindowsUserPath())
     this.userPathWriter = options.userPathWriter ?? ((value) => writeWindowsUserPath(value))
+    this.appImagePath = options.appImagePath ?? process.env.APPIMAGE ?? null
   }
 
   async getStatus(): Promise<CliInstallStatus> {
@@ -118,7 +124,9 @@ export class CliInstaller {
     const baseStatus =
       spec.installMethod === 'symlink'
         ? await this.inspectSymlink(spec.commandPath, launcherPath)
-        : await this.inspectWindowsWrapper(spec.commandPath, launcherPath)
+        : this.appImagePath
+          ? await this.inspectAppImageWrapper(spec.commandPath, this.appImagePath)
+          : await this.inspectWindowsWrapper(spec.commandPath, launcherPath)
     const pathDirectory = dirname(spec.commandPath)
     const pathConfigured = await this.isPathConfigured(pathDirectory)
     return this.withPathInfo(baseStatus, pathDirectory, pathConfigured)
@@ -139,6 +147,8 @@ export class CliInstaller {
     if (status.installMethod === 'symlink') {
       await this.installSymlink(status)
       await this.removeLegacyLinuxCommandIfManaged(status.launcherPath)
+    } else if (this.appImagePath) {
+      await this.installAppImageWrapper(status.commandPath, this.appImagePath)
     } else {
       await this.installWindowsWrapper(status.commandPath, status.launcherPath)
     }
@@ -193,7 +203,11 @@ export class CliInstaller {
     if (this.platform === 'darwin' || this.platform === 'linux') {
       return {
         commandPath,
-        installMethod: 'symlink'
+        // Why: AppImage runs from a FUSE mount at /tmp/.mount_*, so the
+        // bundled launcher path is ephemeral. Use a wrapper script that
+        // references the stable .AppImage file on disk instead of a symlink
+        // that would break on next launch.
+        installMethod: this.appImagePath ? 'wrapper' : 'symlink'
       }
     }
 
@@ -236,6 +250,13 @@ export class CliInstaller {
   private async resolveLauncherPath(): Promise<string | null> {
     if (!['darwin', 'linux', 'win32'].includes(this.platform)) {
       return null
+    }
+
+    // Why: for AppImage, the launcher is the .AppImage file itself — the
+    // wrapper script will invoke it with ELECTRON_RUN_AS_NODE. No need to
+    // resolve the ephemeral bundled launcher inside the FUSE mount.
+    if (this.appImagePath) {
+      return existsSync(this.appImagePath) ? this.appImagePath : null
     }
 
     if (this.isPackaged) {
@@ -321,6 +342,64 @@ export class CliInstaller {
 
   private async installWindowsWrapper(commandPath: string, launcherPath: string): Promise<void> {
     await writeFile(commandPath, buildWindowsForwarder(launcherPath), 'utf8')
+  }
+
+  // Why: AppImage runs from a FUSE mount at /tmp/.mount_OrcaXXXXX/ that is
+  // recreated on every launch with a different suffix. A symlink into that
+  // mount breaks on next boot. Instead, write a self-contained bash wrapper
+  // that locates the stable .AppImage file on disk and runs the CLI entry
+  // point with ELECTRON_RUN_AS_NODE.
+  private async installAppImageWrapper(commandPath: string, appImagePath: string): Promise<void> {
+    const content = buildAppImageWrapper(appImagePath)
+    await writeFile(commandPath, content, { encoding: 'utf8', mode: 0o755 })
+  }
+
+  private async inspectAppImageWrapper(
+    commandPath: string,
+    appImagePath: string
+  ): Promise<CliInstallStatus> {
+    try {
+      const stats = await lstat(commandPath)
+      if (!stats.isFile()) {
+        return this.buildStatus({
+          commandPath,
+          launcherPath: appImagePath,
+          installMethod: 'wrapper',
+          supported: true,
+          state: 'conflict',
+          currentTarget: null,
+          detail: `${commandPath} exists but is not an Orca launcher script.`
+        })
+      }
+
+      const currentContent = await readFile(commandPath, 'utf8')
+      const expectedContent = buildAppImageWrapper(appImagePath)
+      return this.buildStatus({
+        commandPath,
+        launcherPath: appImagePath,
+        installMethod: 'wrapper',
+        supported: true,
+        state: currentContent === expectedContent ? 'installed' : 'stale',
+        currentTarget: appImagePath,
+        detail:
+          currentContent === expectedContent
+            ? `Registered at ${commandPath}.`
+            : `${commandPath} points to a different launcher.`
+      })
+    } catch (error) {
+      if (isMissingError(error)) {
+        return this.buildStatus({
+          commandPath,
+          launcherPath: appImagePath,
+          installMethod: 'wrapper',
+          supported: true,
+          state: 'not_installed',
+          currentTarget: null,
+          detail: `Register ${commandPath} to use Orca from the terminal.`
+        })
+      }
+      throw error
+    }
   }
 
   private async inspectSymlink(
@@ -567,6 +646,43 @@ set NODE_OPTIONS=
 set NODE_REPL_EXTERNAL_MODULE=
 set ELECTRON_RUN_AS_NODE=1
 "%ELECTRON%" "%CLI%" %*
+`
+}
+
+// Why: AppImage bundles the entire app into a single executable that mounts
+// a FUSE filesystem at /tmp/.mount_OrcaXXXXX on each launch. The mount path
+// changes every time, so a symlink into it breaks on reboot. This wrapper
+// script references the stable .AppImage file path on disk and uses
+// ELECTRON_RUN_AS_NODE to run the CLI entry point directly, mirroring the
+// same pattern as the bundled resources/linux/bin/orca-ide launcher but
+// without depending on the ephemeral FUSE mount.
+function buildAppImageWrapper(appImagePath: string): string {
+  // Why: AppImage bundles the app into a single file that mounts a FUSE
+  // filesystem at /tmp/.mount_OrcaXXXXX on each launch. The mount path
+  // changes every time, so a symlink into it breaks on reboot.
+  //
+  // With ELECTRON_RUN_AS_NODE=1, the AppImage runtime still mounts the
+  // squashfs and sets $APPDIR to the mount root, then runs the embedded
+  // Electron binary as a plain Node process. We pass a `-e` inline script
+  // that resolves the CLI entry point from $APPDIR at runtime — this avoids
+  // hardcoding the ephemeral mount path while keeping the wrapper stable.
+  return `#!/usr/bin/env bash
+set -euo pipefail
+# Orca IDE CLI wrapper (AppImage)
+APPIMAGE=${quoteShell(appImagePath)}
+if [ ! -f "$APPIMAGE" ]; then
+  echo "Orca AppImage not found at $APPIMAGE" >&2
+  echo "If you moved the AppImage, re-run CLI registration from Orca Settings." >&2
+  exit 1
+fi
+export ORCA_NODE_OPTIONS="\${NODE_OPTIONS-}"
+export ORCA_NODE_REPL_EXTERNAL_MODULE="\${NODE_REPL_EXTERNAL_MODULE-}"
+unset NODE_OPTIONS
+unset NODE_REPL_EXTERNAL_MODULE
+# Why: $APPDIR is set by the AppImage runtime to the FUSE mount root.
+# The -e script resolves the CLI entry point at runtime so the wrapper
+# does not depend on the ephemeral mount path.
+ELECTRON_RUN_AS_NODE=1 exec "$APPIMAGE" -e "require(require('path').join(process.env.APPDIR,'resources/app.asar.unpacked/out/cli/index.js')).main(process.argv.slice(1))" "$@"
 `
 }
 
