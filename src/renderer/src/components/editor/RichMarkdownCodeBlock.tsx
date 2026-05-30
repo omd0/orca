@@ -1,9 +1,10 @@
-import React, { useCallback, useState } from 'react'
+import React, { lazy, Suspense, useCallback, useState } from 'react'
 import { NodeViewContent, NodeViewWrapper } from '@tiptap/react'
 import type { NodeViewProps } from '@tiptap/react'
 import { Copy, Check } from 'lucide-react'
 import { useAppStore } from '@/store'
-import MermaidBlock from './MermaidBlock'
+// Why: mermaid is ~1.5 MB. Lazy-loading keeps it out of the initial chunk.
+const MermaidBlock = lazy(() => import('./MermaidBlock'))
 
 /**
  * Common languages shown in the selector. The user can also type a language
@@ -118,7 +119,11 @@ export function RichMarkdownCodeBlock({
           Mermaid HTML labels just like markdown preview to keep labels visible. */}
       {isMermaid && node.textContent.trim() && (
         <div contentEditable={false} className="mermaid-preview">
-          <MermaidBlock content={node.textContent.trim()} isDark={isDark} htmlLabels={false} />
+          <Suspense
+            fallback={<div className="p-2 text-xs text-muted-foreground">Loading diagram…</div>}
+          >
+            <MermaidBlock content={node.textContent.trim()} isDark={isDark} htmlLabels={false} />
+          </Suspense>
         </div>
       )}
     </NodeViewWrapper>

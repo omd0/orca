@@ -1,8 +1,10 @@
 import { Image as ImageIcon, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react'
-import { type JSX, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, type JSX, useEffect, useMemo, useState } from 'react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import PdfViewer from './PdfViewer'
+// Why: pdfjs-dist is ~800 KB. Lazy-loading keeps it out of the initial
+// renderer chunk — it only loads when the user opens a PDF file.
+const PdfViewer = lazy(() => import('./PdfViewer'))
 
 const FALLBACK_IMAGE_MIME_TYPE = 'image/png'
 const MIN_ZOOM = 0.25
@@ -69,7 +71,17 @@ export default function ImageViewer({
   }, [cleanedContent, mimeType, isPdf])
 
   if (isPdf) {
-    return <PdfViewer content={cleanedContent} filePath={filePath} />
+    return (
+      <Suspense
+        fallback={
+          <div className="flex items-center justify-center p-8 text-sm text-muted-foreground">
+            Loading PDF viewer…
+          </div>
+        }
+      >
+        <PdfViewer content={cleanedContent} filePath={filePath} />
+      </Suspense>
+    )
   }
 
   if (imageError) {

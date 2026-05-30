@@ -1,7 +1,8 @@
-import React, { useLayoutEffect, useRef } from 'react'
+import React, { lazy, Suspense, useLayoutEffect, useRef } from 'react'
 import { useAppStore } from '@/store'
 import { scrollTopCache, setWithLRU } from '@/lib/scroll-cache'
-import MermaidBlock from './MermaidBlock'
+// Why: mermaid is ~1.5 MB. Lazy-loading keeps it out of the initial chunk.
+const MermaidBlock = lazy(() => import('./MermaidBlock'))
 
 type MermaidViewerProps = {
   content: string
@@ -97,7 +98,11 @@ export default function MermaidViewer({
         {/* Why: DOMPurify's SVG profile strips <foreignObject> elements that
            mermaid uses for HTML labels. Force SVG-native <text> labels so
            they survive sanitization — same fix as the markdown preview path. */}
-        <MermaidBlock content={content.trim()} isDark={isDark} htmlLabels={false} />
+        <Suspense
+          fallback={<div className="p-2 text-xs text-muted-foreground">Loading diagram…</div>}
+        >
+          <MermaidBlock content={content.trim()} isDark={isDark} htmlLabels={false} />
+        </Suspense>
       </div>
     </div>
   )

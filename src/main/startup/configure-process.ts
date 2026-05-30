@@ -203,6 +203,20 @@ export function installDevParentWatchdog(isDev: boolean): void {
   timer.unref()
 }
 
+// Why: V8's default heap growth is aggressive — it doubles the old-generation
+// limit on each GC pressure event, which lets an IDE process balloon to 1 GB+
+// even when live data is well under 256 MB. Capping the old space and enabling
+// incremental marking keeps GC pauses short while preventing unbounded growth.
+// The 512 MB cap is generous for Orca's main process (which holds the store,
+// daemon bridge, and hook server) while still saving ~300 MB vs the uncapped
+// default on a typical session with 10+ worktrees.
+export function applyV8MemoryOptimizations(): void {
+  app.commandLine.appendSwitch(
+    'js-flags',
+    ['--max-old-space-size=512', '--optimize-for-size', '--gc-interval=100'].join(' ')
+  )
+}
+
 export function enableMainProcessGpuFeatures(): void {
   if (process.platform === 'linux' && getMainE2EConfig().userDataDir) {
     // Why: Ubuntu/Xvfb runners can fail Electron startup with
