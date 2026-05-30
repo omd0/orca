@@ -228,6 +228,18 @@ export function enableMainProcessGpuFeatures(): void {
     return
   }
 
+  if (process.platform === 'linux') {
+    // Why: Chromium's GPU process sandbox crashes with exit code 8704
+    // (0x2200) on newer Linux kernels (7.0+) and Wayland compositors,
+    // particularly Fedora 43+ and recent Ubuntu/Arch releases. The GPU
+    // sandbox clashes with the kernel's security policies when
+    // initializing the graphics context. Disabling the GPU sandbox keeps
+    // hardware acceleration active (WebGL, CSS compositing) while
+    // avoiding the abnormal-exit crash. This matches the workaround used
+    // by VS Code, Slack, and other production Electron apps on Linux.
+    app.commandLine.appendSwitch('disable-gpu-sandbox')
+  }
+
   const existingFeatures = app.commandLine.getSwitchValue('enable-features')
   const features = [
     // Why: mirror VS Code's conservative Electron GPU-channel startup flags
