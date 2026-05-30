@@ -50,7 +50,7 @@ import { filterProjectTableRowsByOpenRepos } from './project-row-filtering'
 
 type Props = Record<string, never>
 
-const ORCA_FEATURE_REQUEST_URL = 'https://github.com/stablyai/orca/issues/new'
+const ORCA_FEATURE_REQUEST_URL = 'https://github.com/omd0/orca/issues/new'
 
 function listProjectViewsForRuntime(
   settings: Parameters<typeof getActiveRuntimeTarget>[0],

@@ -546,7 +546,7 @@ async function pinDefaultReleaseFeed(): Promise<void> {
   } else {
     clearPrereleaseFallbackContext()
     clearPublishingWindowLastGoodCheck()
-    const url = 'https://github.com/stablyai/orca/releases/latest/download'
+    const url = 'https://github.com/omd0/orca/releases/latest/download'
     console.info(
       `[updater] release feed fallback: current=${currentVersion} includePrerelease=${includePrerelease} → ${url}`
     )
@@ -875,7 +875,7 @@ export function setupAutoUpdater(
   // moving /latest redirect changing between check and download.
   autoUpdater.setFeedURL({
     provider: 'generic',
-    url: 'https://github.com/stablyai/orca/releases/latest/download'
+    url: 'https://github.com/omd0/orca/releases/latest/download'
   })
 
   if (autoUpdaterInitialized) {

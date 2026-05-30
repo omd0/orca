@@ -187,7 +187,7 @@ export function CardFooter(props: {
             marginLeft: 5
           }}
         >
-          github.com/stablyai/orca
+          github.com/omd0/orca
         </span>
       </div>
     </div>

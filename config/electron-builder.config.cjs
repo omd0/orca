@@ -7,6 +7,12 @@ const featureWallResources = {
   from: 'resources/onboarding/feature-wall',
   to: 'onboarding/feature-wall'
 }
+// Why: bundled skills are symlinked into ~/.claude/skills/ at CLI install time
+// so Claude discovers them automatically without `npx skills add`.
+const skillsResources = {
+  from: 'skills',
+  to: 'skills'
+}
 // Why: SSH relay deploy resolves bundles from process.resourcesPath in packaged
 // apps. Keeping relay assets as extraResources makes them real directories
 // instead of paths hidden inside app.asar.
@@ -117,7 +123,8 @@ module.exports = {
         from: 'native/computer-use-windows/runtime.ps1',
         to: 'computer-use-windows/runtime.ps1'
       },
-      featureWallResources
+      featureWallResources,
+      skillsResources
     ]
   },
   nsis: {
@@ -171,7 +178,8 @@ module.exports = {
         from: 'native/computer-use-macos/.build/release/Orca Computer Use.app',
         to: 'Orca Computer Use.app'
       },
-      featureWallResources
+      featureWallResources,
+      skillsResources
     ],
     target: [
       {
@@ -211,7 +219,8 @@ module.exports = {
         from: 'native/computer-use-linux/runtime.py',
         to: 'computer-use-linux/runtime.py'
       },
-      featureWallResources
+      featureWallResources,
+      skillsResources
     ],
     target: ['AppImage', 'deb', 'rpm'],
     maintainer: 'stablyai',
@@ -238,7 +247,7 @@ module.exports = {
   npmRebuild: true,
   publish: {
     provider: 'github',
-    owner: 'stablyai',
+    owner: 'omd0',
     repo: 'orca',
     releaseType: 'release'
   }

@@ -17,8 +17,8 @@ function releaseUrlForVersion(version: string | null): string {
   // when GitHub's release API is degraded, and the listing is the most
   // reliable manual fallback.
   return version
-    ? `https://github.com/stablyai/orca/releases/tag/v${version}`
-    : 'https://github.com/stablyai/orca/releases'
+    ? `https://github.com/omd0/orca/releases/tag/v${version}`
+    : 'https://github.com/omd0/orca/releases'
 }
 
 function isAnimatedGif(url: string | undefined): boolean {
