@@ -44,7 +44,9 @@ try {
 }
 
 export function getBridgePathFromCommandPath(commandPath: string): string {
-  return `${commandPath.replace(/\/\.local\/bin\/orca$/, '/.local/share/orca')}/orca-wsl-bridge.ps1`
+  // Why: the bridge script lives under ~/.local/share/orca regardless of the
+  // command name, since it's an internal implementation detail not exposed to users.
+  return `${commandPath.replace(/\/\.local\/bin\/orca(-ide)?$/, '/.local/share/orca')}/orca-wsl-bridge.ps1`
 }
 
 export function buildSafeReplaceGuard(path: string, managedMarker: string): string {

@@ -6,7 +6,8 @@
   "author": "stablyai",
   "bin": {
     "orca": "./out/cli/index.js",
-    "orca-dev": "./config/scripts/orca-dev"
+    "orca-dev": "./config/scripts/orca-dev",
+    "orca-ide": "./out/cli/index.js"
   },
   "main": "./out/main/index.js",
   "scripts": {

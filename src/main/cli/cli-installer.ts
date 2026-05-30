@@ -68,12 +68,18 @@ export class CliInstaller {
     this.userPathWriter = options.userPathWriter ?? ((value) => writeWindowsUserPath(value))
   }
 
+  // Why: on Linux the CLI command is `orca-ide` to avoid conflicting with
+  // GNOME Orca (/usr/bin/orca). All other platforms keep `orca`.
+  private get commandName(): string {
+    return this.platform === 'linux' ? 'orca-ide' : 'orca'
+  }
+
   async getStatus(): Promise<CliInstallStatus> {
     const spec = this.resolveInstallSpec()
     if (!spec) {
       return {
         platform: this.platform,
-        commandName: 'orca',
+        commandName: this.commandName,
         commandPath: null,
         pathDirectory: null,
         pathConfigured: false,
@@ -91,7 +97,7 @@ export class CliInstaller {
     if (!launcherPath) {
       return {
         platform: this.platform,
-        commandName: 'orca',
+        commandName: this.commandName,
         commandPath: spec.commandPath,
         pathDirectory: dirname(spec.commandPath),
         pathConfigured: false,
@@ -209,7 +215,10 @@ export class CliInstaller {
       // Why: Linux does not have a single privileged global shell-command flow
       // equivalent to macOS's /usr/local/bin integration. ~/.local/bin is the
       // least surprising user-scoped location that many distros already expose.
-      return join(this.homePath, '.local', 'bin', 'orca')
+      // Why: the command is `orca-ide` on Linux to avoid conflicting with
+      // GNOME Orca (the screen reader), which ships as /usr/bin/orca on
+      // Ubuntu, Fedora, and most GNOME-based distributions.
+      return join(this.homePath, '.local', 'bin', 'orca-ide')
     }
 
     if (this.platform === 'win32') {
@@ -387,7 +396,7 @@ export class CliInstaller {
   }): CliInstallStatus {
     return {
       platform: this.platform,
-      commandName: 'orca',
+      commandName: this.commandName,
       commandPath: args.commandPath,
       pathDirectory: dirname(args.commandPath),
       pathConfigured: false,
@@ -480,7 +489,7 @@ async function ensureDevLauncher(args: {
   const launcherPath = join(
     args.userDataPath,
     ...DEV_LAUNCHER_DIR,
-    args.platform === 'win32' ? 'orca.cmd' : 'orca'
+    args.platform === 'win32' ? 'orca.cmd' : args.platform === 'linux' ? 'orca-ide' : 'orca'
   )
   await mkdir(dirname(launcherPath), { recursive: true })
 
@@ -623,8 +632,12 @@ export function getBundledLauncherPath(
   platform: NodeJS.Platform,
   resourcesPath: string
 ): string | null {
-  if (platform === 'darwin' || platform === 'linux') {
+  if (platform === 'darwin') {
     return join(resourcesPath, 'bin', 'orca')
+  }
+  // Why: Linux uses `orca-ide` to avoid conflicting with GNOME Orca.
+  if (platform === 'linux') {
+    return join(resourcesPath, 'bin', 'orca-ide')
   }
   if (platform === 'win32') {
     return join(resourcesPath, 'bin', 'orca.cmd')

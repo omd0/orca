@@ -12,7 +12,7 @@ const itRunsUnixShell = process.platform === 'win32' ? it.skip : it
 const builderConfig = require('../../../config/electron-builder.config.cjs') as {
   asarUnpack?: string[]
 }
-const linuxLauncherAsset = new URL('../../../resources/linux/bin/orca', import.meta.url)
+const linuxLauncherAsset = new URL('../../../resources/linux/bin/orca-ide', import.meta.url)
 
 describe('packaged CLI assets', () => {
   it('unpacks runtime dependencies used before Electron asar integration is available', () => {
@@ -35,7 +35,7 @@ describe('packaged CLI assets', () => {
         const resourcesDir = join(appDir, 'resources')
         const launcherDir = join(resourcesDir, 'bin')
         const cliDir = join(resourcesDir, 'app.asar.unpacked', 'out', 'cli')
-        const launcherPath = join(launcherDir, 'orca')
+        const launcherPath = join(launcherDir, 'orca-ide')
         const electronPath = join(appDir, 'orca-ide')
         const cliPath = join(cliDir, 'index.js')
 
@@ -62,7 +62,7 @@ printf 'arg=%s\\n' "$@"
 
         const homeDir = join(root, 'home')
         const commandDir = join(homeDir, '.local', 'bin')
-        const commandPath = join(commandDir, 'orca')
+        const commandPath = join(commandDir, 'orca-ide')
         await mkdir(commandDir, { recursive: true })
         await mkdir(join(homeDir, 'orca'), { recursive: true })
         await symlink(launcherPath, commandPath)
