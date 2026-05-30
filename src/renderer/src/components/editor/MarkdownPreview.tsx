@@ -2,6 +2,8 @@
 search, and viewport state for the preview surface in one place so markdown
 behavior stays coherent across split panes and preview tabs. */
 import React, {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -57,7 +59,9 @@ import {
 import { absolutePathToFileUri, resolveMarkdownLinkTarget } from './markdown-internal-links'
 import { useLocalImageSrc } from './useLocalImageSrc'
 import CodeBlockCopyButton from './CodeBlockCopyButton'
-import MermaidBlock from './MermaidBlock'
+// Why: mermaid is ~1.5 MB. Lazy-loading keeps it out of the initial renderer
+// chunk — it only loads when a markdown file actually contains a mermaid block.
+const MermaidBlock = lazy(() => import('./MermaidBlock'))
 import {
   applyMarkdownPreviewSearchHighlights,
   clearMarkdownPreviewSearchHighlights,
@@ -1394,7 +1398,15 @@ export default function MarkdownPreview({
       code: ({ className, children, ...props }) => {
         if (/language-mermaid/.test(className || '')) {
           return (
-            <MermaidBlock content={String(children).trimEnd()} isDark={isDark} htmlLabels={false} />
+            <Suspense
+              fallback={<div className="p-2 text-xs text-muted-foreground">Loading diagram…</div>}
+            >
+              <MermaidBlock
+                content={String(children).trimEnd()}
+                isDark={isDark}
+                htmlLabels={false}
+              />
+            </Suspense>
           )
         }
         return (

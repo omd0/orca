@@ -8,7 +8,17 @@ import { join } from 'path'
 import os from 'node:os'
 import { app, BrowserWindow, nativeImage, nativeTheme } from 'electron'
 import { electronApp, is } from '@electron-toolkit/utils'
-import * as QRCode from 'qrcode'
+// Why: QRCode is only used in the rare `orca serve --serve-mobile-pairing`
+// path. Lazy-loading avoids pulling its WASM/canvas dependencies into the
+// main-process heap on every startup.
+import type * as QRCodeModule from 'qrcode'
+let _qrcode: typeof QRCodeModule | null = null
+async function getQRCode(): Promise<typeof QRCodeModule> {
+  if (!_qrcode) {
+    _qrcode = await import('qrcode')
+  }
+  return _qrcode
+}
 import devIcon from '../../resources/icon-dev.png?asset'
 import { Store, initDataPath } from './persistence'
 import { StatsCollector, initStatsPath } from './stats/collector'
@@ -44,6 +54,7 @@ import {
 } from './menu/register-app-menu'
 import { checkForUpdatesFromMenu, isQuittingForUpdate } from './updater'
 import {
+  applyV8MemoryOptimizations,
   configureDevUserDataPath,
   enableMainProcessGpuFeatures,
   installDevParentDisconnectQuit,
@@ -186,6 +197,7 @@ const devAgentHookEndpointNamespace = devInstanceIdentity.isDev
   : undefined
 
 installUncaughtPipeErrorGuard()
+applyV8MemoryOptimizations()
 // Why: propagate the Orca app version into `process.env` so PTY-env
 // construction in both main (local-pty-provider) and the forked daemon
 // (pty-subprocess) can set `TERM_PROGRAM_VERSION` without re-importing
@@ -791,9 +803,11 @@ function getBundledWebClientRoot(): string | undefined {
 
 async function renderTerminalPairingQr(pairingUrl: string): Promise<string | null> {
   try {
+    const QRCode = await getQRCode()
     return await QRCode.toString(pairingUrl, { type: 'terminal', small: true })
   } catch {
     try {
+      const QRCode = await getQRCode()
       return await QRCode.toString(pairingUrl, { type: 'utf8' })
     } catch {
       return null
