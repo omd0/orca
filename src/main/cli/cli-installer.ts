@@ -7,6 +7,7 @@ import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import type { CliInstallMethod, CliInstallStatus } from '../../shared/cli-install-types'
+import { buildAppImageCliWrapper } from './appimage-cli-wrapper'
 
 const execFileAsync = promisify(execFile)
 const DEFAULT_MAC_COMMAND_PATH = '/usr/local/bin/orca'
@@ -31,6 +32,8 @@ type CliInstallerOptions = {
   privilegedRunner?: (command: string) => Promise<void>
   userPathReader?: () => Promise<string | null>
   userPathWriter?: (value: string) => Promise<void>
+  /** Why: AppImage reports a stable outer file path via $APPIMAGE while bundled resources live in an ephemeral FUSE mount. */
+  appImagePath?: string | null
 }
 
 type InstallSpec = {
@@ -53,6 +56,7 @@ export class CliInstaller {
   private readonly privilegedRunner: (command: string) => Promise<void>
   private readonly userPathReader: () => Promise<string | null>
   private readonly userPathWriter: (value: string) => Promise<void>
+  private readonly appImagePath: string | null
 
   // Why: Linux uses `orca-ide` to avoid shadowing GNOME Orca's /usr/bin/orca.
   private get commandName(): string {
@@ -88,6 +92,10 @@ export class CliInstaller {
     this.privilegedRunner = options.privilegedRunner ?? runMacPrivilegedCommand
     this.userPathReader = options.userPathReader ?? (() => readWindowsUserPath())
     this.userPathWriter = options.userPathWriter ?? ((value) => writeWindowsUserPath(value))
+    this.appImagePath =
+      this.platform === 'linux' && this.isPackaged
+        ? (options.appImagePath ?? process.env.APPIMAGE ?? null)
+        : null
   }
 
   async getStatus(): Promise<CliInstallStatus> {
@@ -111,6 +119,12 @@ export class CliInstaller {
 
     const launcherPath = await this.resolveLauncherPath()
     if (!launcherPath) {
+      const detail =
+        this.isLinuxAppImage() && this.appImagePath
+          ? `The AppImage file at ${this.appImagePath} is missing. Move it back or re-run CLI registration from the current AppImage location.`
+          : this.isPackaged
+            ? 'The bundled CLI launcher is missing from this Orca build.'
+            : 'Development mode uses a generated launcher for validation only.'
       return {
         platform: this.platform,
         commandName: this.commandName,
@@ -123,16 +137,16 @@ export class CliInstaller {
         state: 'unsupported',
         currentTarget: null,
         unsupportedReason: this.isPackaged ? 'launcher_missing' : 'launch_mode_unavailable',
-        detail: this.isPackaged
-          ? 'The bundled CLI launcher is missing from this Orca build.'
-          : 'Development mode uses a generated launcher for validation only.'
+        detail
       }
     }
 
     const baseStatus =
       spec.installMethod === 'symlink'
         ? await this.inspectSymlink(spec.commandPath, launcherPath)
-        : await this.inspectWindowsWrapper(spec.commandPath, launcherPath)
+        : this.isLinuxAppImage()
+          ? await this.inspectAppImageWrapper(spec.commandPath, launcherPath)
+          : await this.inspectWindowsWrapper(spec.commandPath, launcherPath)
     const pathDirectory = dirname(spec.commandPath)
     const pathConfigured = await this.isPathConfigured(pathDirectory)
     return this.withPathInfo(baseStatus, pathDirectory, pathConfigured)
@@ -150,6 +164,9 @@ export class CliInstaller {
     // eslint-disable-next-line unicorn/prefer-ternary -- Why: the install path performs async side effects and is easier to audit as an explicit branch than as an awaited ternary.
     if (status.installMethod === 'symlink') {
       await this.installSymlink(status)
+      await this.removeLegacyLinuxCommandIfManaged(status.launcherPath)
+    } else if (this.isLinuxAppImage()) {
+      await this.installAppImageWrapper(status.commandPath, status.launcherPath)
       await this.removeLegacyLinuxCommandIfManaged(status.launcherPath)
     } else {
       // Why: mkdir stays here for the Windows wrapper path — the target dir is
@@ -210,7 +227,7 @@ export class CliInstaller {
     if (this.platform === 'darwin' || this.platform === 'linux') {
       return {
         commandPath,
-        installMethod: 'symlink'
+        installMethod: this.isLinuxAppImage() ? 'wrapper' : 'symlink'
       }
     }
 
@@ -253,6 +270,10 @@ export class CliInstaller {
   private async resolveLauncherPath(): Promise<string | null> {
     if (!['darwin', 'linux', 'win32'].includes(this.platform)) {
       return null
+    }
+
+    if (this.isLinuxAppImage()) {
+      return this.appImagePath && existsSync(this.appImagePath) ? this.appImagePath : null
     }
 
     if (this.isPackaged) {
@@ -325,8 +346,7 @@ export class CliInstaller {
 
       const currentTarget = await readlink(legacyCommandPath)
       const resolvedCurrentTarget = resolve(dirname(legacyCommandPath), currentTarget)
-      const legacyLauncherPath = resolve(dirname(launcherPath), LEGACY_LINUX_COMMAND_NAME)
-      if (resolvedCurrentTarget !== legacyLauncherPath) {
+      if (!this.isManagedLegacyLinuxTarget(resolvedCurrentTarget, launcherPath)) {
         return
       }
 
@@ -341,8 +361,87 @@ export class CliInstaller {
     }
   }
 
+  private isManagedLegacyLinuxTarget(resolvedTarget: string, launcherPath: string): boolean {
+    const legacyLauncherPath = resolve(dirname(launcherPath), LEGACY_LINUX_COMMAND_NAME)
+    if (resolvedTarget === legacyLauncherPath) {
+      return true
+    }
+
+    if (basename(resolvedTarget) !== LEGACY_LINUX_COMMAND_NAME) {
+      return false
+    }
+
+    const devLauncherDir = resolve(this.userDataPath, ...DEV_LAUNCHER_DIR)
+    const devRelative = relative(devLauncherDir, resolvedTarget)
+    if (devRelative && !devRelative.startsWith('..') && !isAbsolute(devRelative)) {
+      return true
+    }
+
+    // Why: AppImage upgrades can leave a legacy symlink into a now-gone FUSE
+    // mount; the stable AppImage path is not a sibling of that old target.
+    return /(?:^|[/\\])resources[/\\]bin[/\\]orca$/.test(resolvedTarget)
+  }
+
   private async installWindowsWrapper(commandPath: string, launcherPath: string): Promise<void> {
     await writeFile(commandPath, buildWindowsForwarder(launcherPath), 'utf8')
+  }
+
+  private async installAppImageWrapper(commandPath: string, appImagePath: string): Promise<void> {
+    // Why: unlike macOS symlink install, AppImage uses the user-writable Linux
+    // command dir and must create it before writing the wrapper file.
+    await mkdir(dirname(commandPath), { recursive: true })
+    await writeFile(commandPath, buildAppImageCliWrapper(appImagePath), {
+      encoding: 'utf8',
+      mode: 0o755
+    })
+  }
+
+  private async inspectAppImageWrapper(
+    commandPath: string,
+    appImagePath: string
+  ): Promise<CliInstallStatus> {
+    try {
+      const stats = await lstat(commandPath)
+      if (!stats.isFile()) {
+        return this.buildStatus({
+          commandPath,
+          launcherPath: appImagePath,
+          installMethod: 'wrapper',
+          supported: true,
+          state: 'conflict',
+          currentTarget: null,
+          detail: `${commandPath} exists but is not an Orca launcher script.`
+        })
+      }
+
+      const currentContent = await readFile(commandPath, 'utf8')
+      const expectedContent = buildAppImageCliWrapper(appImagePath)
+      return this.buildStatus({
+        commandPath,
+        launcherPath: appImagePath,
+        installMethod: 'wrapper',
+        supported: true,
+        state: currentContent === expectedContent ? 'installed' : 'stale',
+        currentTarget: appImagePath,
+        detail:
+          currentContent === expectedContent
+            ? `Registered at ${commandPath}.`
+            : `${commandPath} points to a different launcher.`
+      })
+    } catch (error) {
+      if (isMissingError(error)) {
+        return this.buildStatus({
+          commandPath,
+          launcherPath: appImagePath,
+          installMethod: 'wrapper',
+          supported: true,
+          state: 'not_installed',
+          currentTarget: null,
+          detail: `Register ${commandPath} to use Orca from the terminal.`
+        })
+      }
+      throw error
+    }
   }
 
   private async inspectSymlink(
@@ -423,6 +522,10 @@ export class CliInstaller {
     }
 
     return false
+  }
+
+  private isLinuxAppImage(): boolean {
+    return this.platform === 'linux' && Boolean(this.appImagePath)
   }
 
   private async inspectWindowsWrapper(

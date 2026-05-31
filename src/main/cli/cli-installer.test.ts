@@ -28,6 +28,7 @@ vi.mock('node:child_process', () => ({
 }))
 
 import { CliInstaller } from './cli-installer'
+import { buildAppImageCliWrapper } from './appimage-cli-wrapper'
 
 async function makeFixture(): Promise<{
   root: string
@@ -116,6 +117,97 @@ describe('CliInstaller', () => {
     }
   )
 
+  // Why: AppImage resources live under a per-launch FUSE mount, so the
+  // installed shell command must be a stable wrapper rather than a symlink.
+  it.skipIf(process.platform === 'win32')(
+    'creates an AppImage wrapper under the linux command path',
+    async () => {
+      const fixture = await makeFixture()
+      const commandDir = join(fixture.root, '.local', 'bin')
+      const installPath = join(commandDir, 'orca-ide')
+      const appImagePath = join(fixture.root, 'Orca.AppImage')
+      await writeFile(appImagePath, '#!/usr/bin/env bash\n', {
+        encoding: 'utf8',
+        mode: 0o755
+      })
+
+      const installer = new CliInstaller({
+        platform: 'linux',
+        isPackaged: true,
+        appImagePath,
+        commandPathOverride: installPath,
+        processPathEnv: commandDir
+      })
+
+      const initial = await installer.getStatus()
+      expect(initial).toMatchObject({
+        state: 'not_installed',
+        installMethod: 'wrapper',
+        launcherPath: appImagePath
+      })
+
+      const installed = await installer.install()
+      expect(installed).toMatchObject({
+        state: 'installed',
+        commandName: 'orca-ide',
+        installMethod: 'wrapper',
+        launcherPath: appImagePath,
+        currentTarget: appImagePath,
+        pathConfigured: true
+      })
+
+      const commandStats = await lstat(installPath)
+      expect(commandStats.isFile()).toBe(true)
+      expect(commandStats.mode & 0o111).not.toBe(0)
+      await expect(readlink(installPath)).rejects.toMatchObject({ code: 'EINVAL' })
+      await expect(readFile(installPath, 'utf8')).resolves.toBe(
+        buildAppImageCliWrapper(appImagePath)
+      )
+
+      const removed = await installer.remove()
+      expect(removed.state).toBe('not_installed')
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'reports a stale AppImage wrapper when the AppImage path changes',
+    async () => {
+      const fixture = await makeFixture()
+      const commandDir = join(fixture.root, '.local', 'bin')
+      const installPath = join(commandDir, 'orca-ide')
+      const oldAppImagePath = join(fixture.root, 'Old-Orca.AppImage')
+      const newAppImagePath = join(fixture.root, 'Orca.AppImage')
+      await mkdir(commandDir, { recursive: true })
+      await writeFile(installPath, buildAppImageCliWrapper(oldAppImagePath), {
+        encoding: 'utf8',
+        mode: 0o755
+      })
+      await writeFile(newAppImagePath, '#!/usr/bin/env bash\n', {
+        encoding: 'utf8',
+        mode: 0o755
+      })
+
+      const installer = new CliInstaller({
+        platform: 'linux',
+        isPackaged: true,
+        appImagePath: newAppImagePath,
+        commandPathOverride: installPath,
+        processPathEnv: commandDir
+      })
+
+      await expect(installer.getStatus()).resolves.toMatchObject({
+        state: 'stale',
+        installMethod: 'wrapper',
+        currentTarget: newAppImagePath
+      })
+
+      await expect(installer.install()).resolves.toMatchObject({ state: 'installed' })
+      await expect(readFile(installPath, 'utf8')).resolves.toBe(
+        buildAppImageCliWrapper(newAppImagePath)
+      )
+    }
+  )
+
   // Why: Linux renamed the public command to avoid shadowing GNOME Orca, so
   // upgrading must clean up only the old symlink owned by prior Orca installs.
   it.skipIf(process.platform === 'win32')(
@@ -137,6 +229,35 @@ describe('CliInstaller', () => {
         userDataPath: fixture.userDataPath,
         execPath: '/opt/Orca/orca-ide',
         appPath: fixture.appPath,
+        homePath,
+        processPathEnv: commandDir
+      })
+
+      const installed = await installer.install()
+      expect(installed.commandPath).toBe(join(commandDir, 'orca-ide'))
+      await expect(lstat(legacyCommandPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'removes a legacy linux orca symlink when installing an AppImage wrapper',
+    async () => {
+      const fixture = await makeFixture()
+      const homePath = join(fixture.root, 'home')
+      const commandDir = join(homePath, '.local', 'bin')
+      const legacyCommandPath = join(commandDir, 'orca')
+      const appImagePath = join(fixture.root, 'Orca.AppImage')
+      await mkdir(commandDir, { recursive: true })
+      await writeFile(appImagePath, '#!/usr/bin/env bash\n', {
+        encoding: 'utf8',
+        mode: 0o755
+      })
+      await symlink(join('/tmp', '.mount_Orca1234', 'resources', 'bin', 'orca'), legacyCommandPath)
+
+      const installer = new CliInstaller({
+        platform: 'linux',
+        isPackaged: true,
+        appImagePath,
         homePath,
         processPathEnv: commandDir
       })
